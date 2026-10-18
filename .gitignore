@@ -3,3 +3,4 @@ Cargo.lock
 # Local source documents and generated PDFs
 /data/
 /*.pdf
+/output/
