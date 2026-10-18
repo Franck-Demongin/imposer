@@ -131,6 +131,17 @@ impl Browser {
     }
 }
 
+struct PendingRun {
+    destination: PathBuf,
+    source_paths: Vec<PathBuf>,
+    sheet: SheetSize,
+    sheet_orientation: SheetOrientation,
+    document_orientation: DocumentOrientation,
+    bleed: f32,
+    safety: f32,
+    rotate: bool,
+}
+
 struct App {
     browser: Browser,
     sources: Vec<PathBuf>,
@@ -147,6 +158,8 @@ struct App {
     busy: bool,
     busy_frame: usize,
     busy_rx: Option<mpsc::Receiver<String>>,
+    create_dir_popup: Option<PathBuf>,
+    pending_generation: Option<PendingRun>,
 }
 
 fn insert_char_at(text: &mut String, cursor: &mut usize, c: char) {
@@ -199,6 +212,8 @@ impl App {
             busy: false,
             busy_frame: 0,
             busy_rx: None,
+            create_dir_popup: None,
+            pending_generation: None,
         }
     }
 
@@ -224,6 +239,39 @@ impl App {
 
     fn handle_key(&mut self, key: KeyEvent) {
         if key.kind != KeyEventKind::Press {
+            return;
+        }
+
+        // Modale de création de dossier : intercepte toutes les touches.
+        if self.create_dir_popup.is_some() {
+            match key.code {
+                KeyCode::Char('o')
+                | KeyCode::Char('O')
+                | KeyCode::Char('y')
+                | KeyCode::Char('Y')
+                | KeyCode::Enter => {
+                    if let (Some(dir), Some(run)) =
+                        (self.create_dir_popup.take(), self.pending_generation.take())
+                    {
+                        match fs::create_dir_all(&dir) {
+                            Ok(()) => self.execute_generation(run),
+                            Err(e) => {
+                                self.status = format!(
+                                    "Impossible de créer le dossier {} : {e}",
+                                    dir.display()
+                                );
+                            }
+                        }
+                    }
+                }
+                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc | KeyCode::Char('q') => {
+                    self.create_dir_popup = None;
+                    self.pending_generation = None;
+                    self.status =
+                        String::from("Génération annulée : dossier de sortie inexistant.");
+                }
+                _ => {}
+            }
             return;
         }
 
@@ -543,39 +591,17 @@ impl App {
         Some(PathBuf::from(directory).join(name))
     }
 
-    fn run_imposition(&mut self) {
-        if self.busy {
-            self.status = String::from("Génération déjà en cours...");
-            return;
-        }
-        if self.sources.is_empty() {
-            self.status = String::from("Aucun fichier source sélectionné.");
-            return;
-        }
-        let destination = match self.output_path() {
-            Some(path) => path,
-            None => {
-                self.status = String::from("Dossier ou nom de sortie invalide.");
-                return;
-            }
-        };
-        if let Some(parent) = destination.parent()
-            && !parent.as_os_str().is_empty()
-            && !parent.is_dir()
-        {
-            self.status = format!("Dossier de sortie introuvable : {}", parent.display());
-            return;
-        }
-
+    fn execute_generation(&mut self, run: PendingRun) {
         self.status = String::from("Exécution en cours...");
 
-        let source_paths = self.sources.clone();
-        let sheet = self.options.sheet;
-        let sheet_orientation = self.options.sheet_orientation;
-        let document_orientation = self.options.document_orientation;
-        let bleed = self.options.bleed;
-        let safety = self.options.safety;
-        let rotate = self.options.rotate;
+        let destination = run.destination;
+        let source_paths = run.source_paths;
+        let sheet = run.sheet;
+        let sheet_orientation = run.sheet_orientation;
+        let document_orientation = run.document_orientation;
+        let bleed = run.bleed;
+        let safety = run.safety;
+        let rotate = run.rotate;
 
         let (tx, rx) = mpsc::channel();
         self.busy_rx = Some(rx);
@@ -597,11 +623,62 @@ impl App {
         });
     }
 
+    fn run_imposition(&mut self) {
+        if self.busy {
+            self.status = String::from("Génération déjà en cours...");
+            return;
+        }
+        if self.sources.is_empty() {
+            self.status = String::from("Aucun fichier source sélectionné.");
+            return;
+        }
+        let destination = match self.output_path() {
+            Some(path) => path,
+            None => {
+                self.status = String::from("Dossier ou nom de sortie invalide.");
+                return;
+            }
+        };
+
+        let run = PendingRun {
+            destination: destination.clone(),
+            source_paths: self.sources.clone(),
+            sheet: self.options.sheet,
+            sheet_orientation: self.options.sheet_orientation,
+            document_orientation: self.options.document_orientation,
+            bleed: self.options.bleed,
+            safety: self.options.safety,
+            rotate: self.options.rotate,
+        };
+
+        if let Some(parent) = destination.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            if parent.is_dir() {
+                // Dossier présent : on génère directement.
+            } else if !parent.exists() {
+                // Dossier absent : on propose de le créer.
+                self.pending_generation = Some(run);
+                self.create_dir_popup = Some(parent.to_path_buf());
+                self.status = format!(
+                    "Dossier de sortie introuvable : {} (créer ? o/n)",
+                    parent.display()
+                );
+                return;
+            } else {
+                self.status = format!("Dossier de sortie introuvable : {}", parent.display());
+                return;
+            }
+        }
+
+        self.execute_generation(run);
+    }
+
     fn handle_mouse(&mut self, mouse: MouseEvent) {
         if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
             return;
         }
-        if self.busy {
+        if self.busy || self.create_dir_popup.is_some() {
             return;
         }
         if let Some(rect) = self.run_button_rect
@@ -796,6 +873,25 @@ impl App {
         f.render_widget(button, button_area);
         self.run_button_rect = Some(button_area);
 
+        // Pop-up de confirmation de création du dossier de sortie.
+        if let Some(dir) = &self.create_dir_popup {
+            let popup_area = centered_rect(60, 9, f.area());
+            f.render_widget(Clear, popup_area);
+            let message = format!(
+                "Le dossier de sortie n'existe pas :\n{}\n\nLe créer ? (o)ui / (n)on",
+                dir.display()
+            );
+            let popup = Paragraph::new(message)
+                .wrap(ratatui::widgets::Wrap { trim: true })
+                .alignment(Alignment::Center)
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title("Créer le dossier ?"),
+                );
+            f.render_widget(popup, popup_area);
+        }
+
         let help = "Raccourcis: Tab focus | ↑↓ | Entrée ajoute (max. 2) | textes: ←→ déplacement, Début/Fin, RetArr/Del | o dossier courant | d dossier sélectionné | Suppr source | g/Entrée/Tab+Entrée générer | clic souris sur Générer | q quitter";
         let displayed_status = if self.busy {
             let spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠏"];
@@ -816,6 +912,31 @@ impl App {
             .wrap(ratatui::widgets::Wrap { trim: true });
         f.render_widget(status, rows[6]);
     }
+}
+
+fn centered_rect(
+    percent_x: u16,
+    height: u16,
+    area: ratatui::layout::Rect,
+) -> ratatui::layout::Rect {
+    let height = height.min(area.height);
+    let vertical = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Min(0),
+            Constraint::Length(height),
+            Constraint::Min(0),
+        ])
+        .split(area);
+    let horizontal = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ])
+        .split(vertical[1]);
+    horizontal[1]
 }
 
 fn render_text_field(
