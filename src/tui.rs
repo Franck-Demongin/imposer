@@ -780,10 +780,19 @@ impl App {
             ])
             .split(rows[5]);
         let button_area = button_row[1];
-        let button = Paragraph::new("Générer")
-            .style(button_style)
-            .alignment(Alignment::Center)
-            .block(Block::default().borders(Borders::ALL));
+        // Bouton focalisé : bloc plein (sans bordure) pour éviter le double
+        // cadre vert autour de la bordure grise ; le fond vert remplit toute la
+        // zone du bouton et le texte est centré horizontalement et verticalement.
+        let button = if self.focus == Focus::Run {
+            Paragraph::new("\nGénérer")
+                .style(button_style)
+                .alignment(Alignment::Center)
+        } else {
+            Paragraph::new("Générer")
+                .style(button_style)
+                .alignment(Alignment::Center)
+                .block(Block::default().borders(Borders::ALL))
+        };
         f.render_widget(button, button_area);
         self.run_button_rect = Some(button_area);
 
