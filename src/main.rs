@@ -3,6 +3,8 @@ use imposer::{ImpositionConfig, impose};
 use std::fs;
 use std::path::PathBuf;
 
+mod tui;
+
 #[derive(Parser, Debug)]
 #[command(
     name = "imposer",
@@ -11,10 +13,10 @@ use std::path::PathBuf;
 )]
 struct Cli {
     #[arg(short, long)]
-    input: PathBuf,
+    input: Option<PathBuf>,
 
     #[arg(short, long)]
-    output: PathBuf,
+    output: Option<PathBuf>,
 
     #[arg(long, value_enum, default_value = "a4")]
     sheet: imposer::config::SheetSize,
@@ -33,11 +35,26 @@ struct Cli {
 
     #[arg(long)]
     no_rotate_copies: bool,
+
+    #[arg(long)]
+    tui: bool,
 }
 
 fn main() {
     let cli = Cli::parse();
-    let input = match fs::read(&cli.input) {
+
+    if cli.tui || cli.input.is_none() || cli.output.is_none() {
+        if let Err(e) = tui::run() {
+            eprintln!("erreur TUI : {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
+
+    let input = cli.input.unwrap();
+    let output = cli.output.unwrap();
+
+    let input = match fs::read(&input) {
         Ok(b) => b,
         Err(e) => {
             eprintln!("erreur lecture entrée : {e}");
@@ -56,15 +73,11 @@ fn main() {
 
     match impose(&input, &config) {
         Ok(bytes) => {
-            if let Err(e) = fs::write(&cli.output, &bytes) {
+            if let Err(e) = fs::write(&output, &bytes) {
                 eprintln!("erreur écriture sortie : {e}");
                 std::process::exit(1);
             }
-            println!(
-                "PDF généré : {} ({} octets)",
-                cli.output.display(),
-                bytes.len()
-            );
+            println!("PDF généré : {} ({} octets)", output.display(), bytes.len());
         }
         Err(e) => {
             eprintln!("erreur : {e}");
