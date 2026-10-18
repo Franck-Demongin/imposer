@@ -45,8 +45,11 @@ Sans argument ni chemin de sortie, l'application ouvre aussi la TUI :
 ./target/release/imposer
 ```
 
-La TUI permet de parcourir les fichiers `pdf`, `png`, `jpg`, `jpeg` et `psd`, de
-choisir le fichier de sortie par défaut et d'ajuster les options avant l'exécution.
+La TUI permet de parcourir les fichiers `pdf`, `png`, `jpg`, `jpeg` et `psd`,
+d'ajouter jusqu'à deux sources dans l'ordre de sélection avec le fichier par
+défaut comme recto, de retirer la dernière source avec `Suppr`, et d'ajuster les
+options avant l'exécution. Un seul PDF peut fournir ses deux pages ; avec
+plusieurs sources, seule la première page de chaque PDF est utilisée.
 
 ## Utilisation CLI
 
