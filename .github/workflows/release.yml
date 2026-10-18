@@ -13,10 +13,31 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
+      - name: Generate release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          previous_tag="$(git describe --tags --abbrev=0 "${tag}^" 2>/dev/null || true)"
+          {
+            printf "# Imposer %s\n\n" "$tag"
+            if [ -n "$previous_tag" ]; then
+              printf "## Modifications depuis %s\n\n" "$previous_tag"
+              git log "${previous_tag}..${GITHUB_SHA}" --no-merges --pretty=format:'- %s (%h)'
+            else
+              printf "## Modifications\n\n"
+              git log "${GITHUB_SHA}" --no-merges --pretty=format:'- %s (%h)' | head -n 50
+            fi
+            printf '\n'
+          } > release_notes.md
       - run: cargo build --release
       - uses: softprops/action-gh-release@v2
         with:
+          name: Imposer ${{ github.ref_name }}
+          body_path: release_notes.md
           files: target/release/imposer.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
