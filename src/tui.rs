@@ -636,7 +636,12 @@ impl App {
                     .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD),
             )
-            .block(Block::default().borders(Borders::ALL).title("Titre"));
+            .alignment(Alignment::Center)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(format!("v{}", env!("CARGO_PKG_VERSION"))),
+            );
         f.render_widget(title, rows[0]);
 
         let main = Layout::default()
