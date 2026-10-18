@@ -110,8 +110,10 @@ Crop marks are derived from unique trim-box edges after optional 90° rotation:
 ## Release Workflow
 
 Tag pushes matching `v*` trigger `.github/workflows/release.yml`, which builds
-`imposer.exe` on Windows, creates a release named `Imposer <tag>`, and uploads
-the executable with commit-derived notes since the previous tag.
+Windows (`imposer.exe`) and Linux (`imposer`) binaries, creates a release named
+`Imposer <tag>` with commit-derived notes since the previous tag, and uploads
+both executables. The Windows build generates the release notes; the Linux build
+runs afterwards and adds its executable to the same release.
 
 ## Repository Notes
 
