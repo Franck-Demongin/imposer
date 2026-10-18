@@ -9,21 +9,27 @@ use crate::config::ImpositionConfig;
 use crate::error::{ImposerError, Result};
 use crate::geometry::mm_to_pt;
 use crate::layout::{LayoutPlan, compute_layout};
+use crate::source::{ImageColorSpace, SourceKind, SourcePage};
 
-pub fn impose(input: &[u8], config: &ImpositionConfig) -> Result<Vec<u8>> {
-    let source = Document::load_mem(input).map_err(|e| ImposerError::Parse(e.to_string()))?;
-
-    let pages_map = source.get_pages();
-    let num_pages = pages_map.len();
+pub fn impose_sources(sources: &[SourcePage], config: &ImpositionConfig) -> Result<Vec<u8>> {
+    if sources.is_empty() {
+        return Err(ImposerError::InvalidPageCount(0));
+    }
+    let num_pages = sources.len();
     if num_pages != 1 && num_pages != 2 {
         return Err(ImposerError::InvalidPageCount(num_pages));
     }
 
-    let mut page_list: Vec<(u32, ObjectId)> = pages_map.into_iter().collect();
-    page_list.sort_by_key(|(n, _)| *n);
-
-    let first_page_id = page_list[0].1;
-    let (source_w, source_h) = get_page_dimensions(&source, first_page_id)?;
+    let first = &sources[0];
+    let source_w = first.width_pt;
+    let source_h = first.height_pt;
+    for s in sources {
+        if (s.width_pt - source_w).abs() > 0.5 || (s.height_pt - source_h).abs() > 0.5 {
+            return Err(ImposerError::Dimensions(
+                "sources de dimensions hétérogènes".to_string(),
+            ));
+        }
+    }
     let plan = compute_layout(source_w, source_h, config)?;
 
     let mut output = Document::with_version("1.7");
@@ -47,21 +53,55 @@ pub fn impose(input: &[u8], config: &ImpositionConfig) -> Result<Vec<u8>> {
         .insert(catalog_id, Object::Dictionary(catalog));
     output.trailer.set("Root", Object::Reference(catalog_id));
 
-    copy_output_intents(&source, &mut output, catalog_id)?;
+    // Output intents copied from first PDF source if available.
+    for s in sources {
+        if let SourceKind::PdfPage { bytes, .. } = &s.kind
+            && let Ok(doc) = Document::load_mem(bytes)
+        {
+            let _ = copy_output_intents(&doc, &mut output, catalog_id);
+            break;
+        }
+    }
 
     let mut cache: HashMap<ObjectId, ObjectId> = HashMap::new();
     let mut page_refs: Vec<Object> = Vec::new();
 
-    for (face_index, (_, source_page_id)) in page_list.iter().enumerate() {
+    for (face_index, src) in sources.iter().enumerate() {
         let is_verso = face_index == 1;
-        let xobj_id = create_form_xobject(
-            &mut output,
-            &source,
-            *source_page_id,
-            source_w,
-            source_h,
-            &mut cache,
-        )?;
+        let xobj_id = match &src.kind {
+            SourceKind::PdfPage { bytes, page_index } => {
+                let source_doc =
+                    Document::load_mem(bytes).map_err(|e| ImposerError::Parse(e.to_string()))?;
+                // retrieve page id at index
+                let mut pl: Vec<(u32, ObjectId)> = source_doc.get_pages().into_iter().collect();
+                pl.sort_by_key(|(n, _)| *n);
+                let page_id = pl.get(*page_index).map(|(_, id)| *id).ok_or_else(|| {
+                    ImposerError::Parse("page introuvable dans la source PDF".to_string())
+                })?;
+                create_form_xobject(
+                    &mut output,
+                    &source_doc,
+                    page_id,
+                    src.width_pt,
+                    src.height_pt,
+                    &mut cache,
+                )?
+            }
+            SourceKind::Raster {
+                pixels,
+                width_px,
+                height_px,
+                color_space,
+            } => create_image_form_xobject(
+                &mut output,
+                pixels,
+                *width_px,
+                *height_px,
+                *color_space,
+                src.width_pt,
+                src.height_pt,
+            )?,
+        };
 
         let mut xobjects = Dictionary::new();
         xobjects.set(b"Page0".to_vec(), Object::Reference(xobj_id));
@@ -116,7 +156,7 @@ pub fn impose(input: &[u8], config: &ImpositionConfig) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
-fn get_page_dimensions(doc: &Document, page_id: ObjectId) -> Result<(f32, f32)> {
+pub fn get_page_dimensions(doc: &Document, page_id: ObjectId) -> Result<(f32, f32)> {
     let page_obj = doc
         .get_object(page_id)
         .map_err(|e| ImposerError::Dimensions(e.to_string()))?;
@@ -366,6 +406,61 @@ pub fn draw_crop_marks(ops: &mut Vec<Operation>, plan: &LayoutPlan) -> Result<()
     Ok(())
 }
 
+fn create_image_form_xobject(
+    output_doc: &mut Document,
+    pixels: &[u8],
+    width_px: u32,
+    height_px: u32,
+    color_space: ImageColorSpace,
+    width_pt: f32,
+    height_pt: f32,
+) -> Result<ObjectId> {
+    let cs: &'static str = match color_space {
+        ImageColorSpace::DeviceGray => "DeviceGray",
+        ImageColorSpace::DeviceRgb => "DeviceRGB",
+        ImageColorSpace::DeviceCmyk => "DeviceCMYK",
+    };
+    if matches!(color_space, ImageColorSpace::DeviceCmyk)
+        && pixels.len() != (width_px as usize * height_px as usize * 4)
+    {
+        return Err(ImposerError::Generation(format!(
+            "pixel count invalid for CMYK: expected {}, got {}",
+            width_px as usize * height_px as usize * 4,
+            pixels.len()
+        )));
+    }
+    // Image XObject
+    let mut img_dict = Dictionary::new();
+    img_dict.set("Type", Object::Name(b"XObject".to_vec()));
+    img_dict.set("Subtype", Object::Name(b"Image".to_vec()));
+    img_dict.set("Width", Object::Integer(width_px as i64));
+    img_dict.set("Height", Object::Integer(height_px as i64));
+    img_dict.set("ColorSpace", Object::Name(cs.as_bytes().to_vec()));
+    img_dict.set("BitsPerComponent", Object::Integer(8));
+    let mut img_stream = Stream::new(img_dict, pixels.to_vec());
+    img_stream.allows_compression = true;
+    let img_id = output_doc.add_object(img_stream);
+
+    // Wrapper Form XObject scaling the image to the source dimensions
+    let content = format!("q {} 0 0 {} 0 0 cm /Img Do Q\n", width_pt, height_pt);
+    let mut form_dict = Dictionary::new();
+    form_dict.set("Type", Object::Name(b"XObject".to_vec()));
+    form_dict.set("Subtype", Object::Name(b"Form".to_vec()));
+    form_dict.set(
+        "BBox",
+        Object::Array(vec![0.into(), 0.into(), width_pt.into(), height_pt.into()]),
+    );
+    let mut xobjects = Dictionary::new();
+    xobjects.set(b"Img".to_vec(), Object::Reference(img_id));
+    let mut resources = Dictionary::new();
+    resources.set(b"XObject".to_vec(), Object::Dictionary(xobjects));
+    form_dict.set("Resources", Object::Dictionary(resources));
+
+    let mut form_stream = Stream::new(form_dict, content.into_bytes());
+    form_stream.allows_compression = true;
+    Ok(output_doc.add_object(form_stream))
+}
+
 fn copy_output_intents(source: &Document, dest: &mut Document, catalog_id: ObjectId) -> Result<()> {
     let src_catalog_id = match source.trailer.get(b"Root") {
         Ok(Object::Reference(id)) => *id,
@@ -507,6 +602,11 @@ fn copy_object_deep(
         _ => Ok(obj.clone()),
     }
 }
+pub fn impose(input: &[u8], config: &ImpositionConfig) -> Result<Vec<u8>> {
+    let sources = crate::source::sources_from_bytes(&[input.to_vec()])?;
+    impose_sources(&sources, config)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

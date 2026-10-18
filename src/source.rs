@@ -1,0 +1,524 @@
+use crate::error::{ImposerError, Result};
+use lopdf::Document;
+use moxcms::{ColorProfile, Layout, TransformOptions};
+use psd::Psd;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImageColorSpace {
+    DeviceGray,
+    DeviceRgb,
+    DeviceCmyk,
+}
+
+#[derive(Debug, Clone)]
+pub enum SourceKind {
+    PdfPage {
+        bytes: Vec<u8>,
+        page_index: usize,
+    },
+    Raster {
+        pixels: Vec<u8>,
+        width_px: u32,
+        height_px: u32,
+        color_space: ImageColorSpace,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub struct SourcePage {
+    pub width_pt: f32,
+    pub height_pt: f32,
+    pub kind: SourceKind,
+}
+
+pub fn sources_from_bytes(inputs: &[Vec<u8>]) -> Result<Vec<SourcePage>> {
+    let mut out = Vec::new();
+    for b in inputs {
+        out.extend(parse_one(b)?);
+    }
+    Ok(out)
+}
+
+fn parse_one(bytes: &[u8]) -> Result<Vec<SourcePage>> {
+    if is_pdf(bytes) {
+        parse_pdf(bytes)
+    } else if is_png(bytes) {
+        Ok(vec![parse_png(bytes)?])
+    } else if is_jpeg(bytes) {
+        Ok(vec![parse_jpeg(bytes)?])
+    } else if is_psd(bytes) {
+        Ok(vec![parse_psd(bytes)?])
+    } else {
+        Err(ImposerError::Parse(
+            "format d'entrée non supporté (attendu PDF, PNG, JPEG ou PSD)".to_string(),
+        ))
+    }
+}
+
+fn is_pdf(b: &[u8]) -> bool {
+    b.starts_with(b"%PDF")
+}
+fn is_png(b: &[u8]) -> bool {
+    b.len() >= 8 && b[0..8] == [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]
+}
+fn is_jpeg(b: &[u8]) -> bool {
+    b.len() >= 3 && b[0] == 0xFF && b[1] == 0xD8 && b[2] == 0xFF
+}
+fn is_psd(b: &[u8]) -> bool {
+    b.starts_with(b"8BPS")
+}
+
+fn parse_pdf(bytes: &[u8]) -> Result<Vec<SourcePage>> {
+    let doc = Document::load_mem(bytes).map_err(|e| ImposerError::Parse(e.to_string()))?;
+    let mut pages: Vec<(u32, lopdf::ObjectId)> = doc.get_pages().into_iter().collect();
+    pages.sort_by_key(|(n, _)| *n);
+    if pages.is_empty() {
+        return Err(ImposerError::InvalidPageCount(0));
+    }
+    let mut out = Vec::new();
+    for (idx, (_, pid)) in pages.into_iter().enumerate() {
+        let (w, h) = crate::pdf::get_page_dimensions(&doc, pid)?;
+        out.push(SourcePage {
+            width_pt: w,
+            height_pt: h,
+            kind: SourceKind::PdfPage {
+                bytes: bytes.to_vec(),
+                page_index: idx,
+            },
+        });
+    }
+    Ok(out)
+}
+
+// ---------- PNG ----------
+fn parse_png(bytes: &[u8]) -> Result<SourcePage> {
+    let img = image::load_from_memory_with_format(bytes, image::ImageFormat::Png)
+        .map_err(|e| ImposerError::Parse(format!("PNG : {e}")))?;
+    let rgb = img.to_rgb8();
+    let (dpi_x, dpi_y) = png_dpi(bytes).unwrap_or((300.0, 300.0));
+    let w_px = rgb.width();
+    let h_px = rgb.height();
+    let width_pt = w_px as f32 / dpi_x * 72.0;
+    let height_pt = h_px as f32 / dpi_y * 72.0;
+    Ok(SourcePage {
+        width_pt,
+        height_pt,
+        kind: SourceKind::Raster {
+            pixels: rgb.into_raw(),
+            width_px: w_px,
+            height_px: h_px,
+            color_space: ImageColorSpace::DeviceRgb,
+        },
+    })
+}
+
+fn png_dpi(bytes: &[u8]) -> Option<(f32, f32)> {
+    let mut i = 8usize;
+    while i + 12 <= bytes.len() {
+        let len = u32::from_be_bytes(bytes[i..i + 4].try_into().ok()?) as usize;
+        if i + 8 + len + 4 > bytes.len() {
+            break;
+        }
+        let typ = &bytes[i + 4..i + 8];
+        let data_start = i + 8;
+        if typ == b"pHYs" && len == 9 {
+            let px = u32::from_be_bytes(bytes[data_start..data_start + 4].try_into().ok()?);
+            let py = u32::from_be_bytes(bytes[data_start + 4..data_start + 8].try_into().ok()?);
+            let unit = bytes[data_start + 8];
+            if unit == 1 {
+                let dpi_x = px as f32 / 39.370_08;
+                let dpi_y = py as f32 / 39.370_08;
+                return Some((dpi_x, dpi_y));
+            }
+        }
+        i = data_start + len + 4; // skip data + crc
+    }
+    None
+}
+
+// ---------- JPEG ----------
+fn parse_jpeg(bytes: &[u8]) -> Result<SourcePage> {
+    let img = image::load_from_memory_with_format(bytes, image::ImageFormat::Jpeg)
+        .map_err(|e| ImposerError::Parse(format!("JPEG : {e}")))?;
+    let rgb = img.to_rgb8();
+    let (dpi_x, dpi_y) = jpeg_dpi(bytes).unwrap_or((300.0, 300.0));
+    let w_px = rgb.width();
+    let h_px = rgb.height();
+    let width_pt = w_px as f32 / dpi_x * 72.0;
+    let height_pt = h_px as f32 / dpi_y * 72.0;
+    Ok(SourcePage {
+        width_pt,
+        height_pt,
+        kind: SourceKind::Raster {
+            pixels: rgb.into_raw(),
+            width_px: w_px,
+            height_px: h_px,
+            color_space: ImageColorSpace::DeviceRgb,
+        },
+    })
+}
+
+fn jpeg_dpi(bytes: &[u8]) -> Option<(f32, f32)> {
+    let mut i = 2usize; // after SOI
+    let n = bytes.len();
+    while i + 1 < n {
+        if bytes[i] != 0xFF {
+            i += 1;
+            continue;
+        }
+        // skip fill bytes
+        let marker = bytes[i + 1];
+        if marker == 0x00 {
+            i += 2;
+            continue;
+        }
+        if marker == 0xD9 || marker == 0xDA {
+            break; // EOI or SOS
+        }
+        // standalone markers without length
+        if (0xD0..=0xD9).contains(&marker) && marker != 0xD8 {
+            i += 2;
+            continue;
+        }
+        if i + 4 > n {
+            break;
+        }
+        let seglen = u16::from_be_bytes([bytes[i + 2], bytes[i + 3]]) as usize;
+        if seglen < 2 || i + 2 + seglen > n {
+            break;
+        }
+        if marker == 0xE0 && seglen >= 14 && &bytes[i + 4..i + 8] == b"JFIF\0" {
+            let units = bytes[i + 11];
+            let x = u16::from_be_bytes([bytes[i + 12], bytes[i + 13]]);
+            let y = u16::from_be_bytes([bytes[i + 14], bytes[i + 15]]);
+            if units == 1 {
+                return Some((x as f32, y as f32));
+            }
+            if units == 2 {
+                return Some((x as f32 * 2.54, y as f32 * 2.54));
+            }
+        }
+        i += 2 + seglen;
+    }
+    None
+}
+
+// ---------- PSD ----------
+fn parse_psd(bytes: &[u8]) -> Result<SourcePage> {
+    if let Ok(s) = parse_psd_zune(bytes) {
+        return Ok(s);
+    }
+    parse_psd_legacy(bytes)
+}
+
+fn parse_psd_zune(bytes: &[u8]) -> Result<SourcePage> {
+    use zune_psd::PSDDecoder;
+    use zune_psd::zune_core::bytestream::ZCursor;
+
+    let mut decoder = PSDDecoder::new(ZCursor::new(bytes));
+    decoder
+        .decode_headers()
+        .map_err(|e| ImposerError::Parse(format!("PSD : {e:?}")))?;
+    let (w, h) = decoder
+        .dimensions()
+        .ok_or_else(|| ImposerError::Parse("PSD : dimensions manquantes".to_string()))?;
+    let colorspace = decoder
+        .colorspace()
+        .ok_or_else(|| ImposerError::Parse("PSD : espace couleur non supporté".to_string()))?;
+
+    let raw = decoder
+        .decode_raw()
+        .map_err(|e| ImposerError::Parse(format!("PSD : {e:?}")))?;
+    let raw = if decoder.bit_depth() == Some(zune_psd::zune_core::bit_depth::BitDepth::Sixteen) {
+        // Downconvert 16-bit to 8-bit without treating planar data as RGBA.
+        // Each plane is laid out contiguously and header channel counts apply.
+        raw.as_chunks::<2>().0.iter().map(|b| b[0]).collect()
+    } else {
+        raw
+    };
+
+    if w == 0 || h == 0 {
+        return Err(ImposerError::Parse(
+            "PSD : dimensions invalides".to_string(),
+        ));
+    }
+    let pixels = w * h;
+    if pixels == 0 || raw.len() < pixels {
+        return Err(ImposerError::Parse("PSD : données incomplètes".to_string()));
+    }
+    let channels = raw.len() / pixels;
+    let rgb = match colorspace {
+        zune_psd::zune_core::colorspace::ColorSpace::RGB
+        | zune_psd::zune_core::colorspace::ColorSpace::RGBA => {
+            if channels == 3 {
+                deinterleave_rgb(&raw, pixels)
+            } else if channels == 4 {
+                deinterleave_rgba_to_rgb(&raw, pixels)
+            } else {
+                return Err(ImposerError::Parse("PSD : canal inattendu".to_string()));
+            }
+        }
+        zune_psd::zune_core::colorspace::ColorSpace::Luma => {
+            deinterleave_gray(&raw, pixels, channels)
+        }
+        zune_psd::zune_core::colorspace::ColorSpace::LumaA => deinterleave_gray_alpha(&raw, pixels),
+        zune_psd::zune_core::colorspace::ColorSpace::CMYK => {
+            if channels != 4 {
+                return Err(ImposerError::Parse(
+                    "PSD : nombre de canaux CMJN inattendu".to_string(),
+                ));
+            }
+
+            // zune-psd exposes a 4-byte CMYK raster directly. The embedded CMYK
+            // samples use the inverse polarity for this profile, and are converted
+            // to sRGB after complementing them.
+            let inverted: Vec<u8> = raw.iter().map(|v| 255u8.wrapping_sub(*v)).collect();
+            let rgb = match extract_psd_embedded_profile(bytes) {
+                Some(iccs) => cmyk_icc_to_rgb(&iccs, &inverted)
+                    .map_err(|e| ImposerError::Parse(format!("PSD ICC : {e}")))?,
+                None => {
+                    // Without an ICC profile, preserve the inverted sample order directly
+                    // as CMYK and let the PDF layer describe the colour space.
+                    let width_pt = w as f32 / 300.0 * 72.0;
+                    let height_pt = h as f32 / 300.0 * 72.0;
+                    return Ok(SourcePage {
+                        width_pt,
+                        height_pt,
+                        kind: SourceKind::Raster {
+                            pixels: inverted,
+                            width_px: w as u32,
+                            height_px: h as u32,
+                            color_space: ImageColorSpace::DeviceCmyk,
+                        },
+                    });
+                }
+            };
+            let width_pt = w as f32 / 300.0 * 72.0;
+            let height_pt = h as f32 / 300.0 * 72.0;
+            return Ok(SourcePage {
+                width_pt,
+                height_pt,
+                kind: SourceKind::Raster {
+                    pixels: rgb,
+                    width_px: w as u32,
+                    height_px: h as u32,
+                    color_space: ImageColorSpace::DeviceRgb,
+                },
+            });
+        }
+        _ => {
+            return Err(ImposerError::Parse(
+                "PSD : espace couleur non supporté".to_string(),
+            ));
+        }
+    };
+
+    Ok(make_raster_source(
+        w as u32,
+        h as u32,
+        rgb,
+        300.0,
+        300.0,
+        ImageColorSpace::DeviceRgb,
+    ))
+}
+
+fn deinterleave_rgb(raw: &[u8], pixels: usize) -> Vec<u8> {
+    let channels = raw.len() / pixels;
+    let mut out = vec![0u8; pixels * 3];
+    for p in 0..pixels {
+        out[p * 3] = raw[p * channels];
+        out[p * 3 + 1] = raw[p * channels + 1];
+        out[p * 3 + 2] = raw[p * channels + 2];
+    }
+    out
+}
+
+fn deinterleave_rgba_to_rgb(raw: &[u8], pixels: usize) -> Vec<u8> {
+    let channels = raw.len() / pixels;
+    let mut out = vec![0u8; pixels * 3];
+    for p in 0..pixels {
+        let r = raw[p * channels];
+        let g = raw[p * channels + 1];
+        let b = raw[p * channels + 2];
+        let a = raw[p * channels + 3];
+        let af = a as f32 / 255.0;
+        out[p * 3] = (r as f32 * af + 255.0 * (1.0 - af)).round() as u8;
+        out[p * 3 + 1] = (g as f32 * af + 255.0 * (1.0 - af)).round() as u8;
+        out[p * 3 + 2] = (b as f32 * af + 255.0 * (1.0 - af)).round() as u8;
+    }
+    out
+}
+
+fn deinterleave_gray(raw: &[u8], pixels: usize, channels: usize) -> Vec<u8> {
+    let channels = channels.max(1);
+    let mut out = vec![0u8; pixels * 3];
+    for p in 0..pixels {
+        let v = raw[p * channels];
+        out[p * 3] = v;
+        out[p * 3 + 1] = v;
+        out[p * 3 + 2] = v;
+    }
+    out
+}
+
+fn deinterleave_gray_alpha(raw: &[u8], pixels: usize) -> Vec<u8> {
+    let channels = (raw.len() / pixels).max(2);
+    let mut out = vec![0u8; pixels * 3];
+    for p in 0..pixels {
+        let v = raw[p * channels];
+        let a = raw[p * channels + 1];
+        let af = a as f32 / 255.0;
+        let vv = (v as f32 * af + 255.0 * (1.0 - af)).round() as u8;
+        out[p * 3] = vv;
+        out[p * 3 + 1] = vv;
+        out[p * 3 + 2] = vv;
+    }
+    out
+}
+
+fn parse_psd_legacy(bytes: &[u8]) -> Result<SourcePage> {
+    let psd = Psd::from_bytes(bytes).map_err(|e| ImposerError::Parse(format!("PSD : {e}")))?;
+    let w_px = psd.width();
+    let h_px = psd.height();
+    let rgba = psd.rgba();
+    if rgba.len() != (w_px * h_px * 4) as usize {
+        // Try flatten_layers RGBA
+        let filtered = psd.flatten_layers_rgba(&|_| true);
+        match filtered {
+            Ok(v) if v.len() == (w_px * h_px * 4) as usize => {
+                let rgb = rgba_to_rgb(&v);
+                return Ok(make_raster_source(
+                    w_px,
+                    h_px,
+                    rgb,
+                    300.0,
+                    300.0,
+                    ImageColorSpace::DeviceRgb,
+                ));
+            }
+            _ => {}
+        }
+        return Err(ImposerError::Parse(
+            "PSD : données RGBA incohérentes".to_string(),
+        ));
+    }
+    let rgb = rgba_to_rgb(&rgba);
+    Ok(make_raster_source(
+        w_px,
+        h_px,
+        rgb,
+        300.0,
+        300.0,
+        ImageColorSpace::DeviceRgb,
+    ))
+}
+
+fn rgba_to_rgb(rgba: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(rgba.len() / 4 * 3);
+    let mut i = 0;
+    while i + 3 < rgba.len() {
+        let r = rgba[i];
+        let g = rgba[i + 1];
+        let b = rgba[i + 2];
+        let a = rgba[i + 3];
+        // Compose alpha over white
+        let a = a as f32 / 255.0;
+        let rr = (r as f32 * a + 255.0 * (1.0 - a)).round() as u8;
+        let gg = (g as f32 * a + 255.0 * (1.0 - a)).round() as u8;
+        let bb = (b as f32 * a + 255.0 * (1.0 - a)).round() as u8;
+        out.push(rr);
+        out.push(gg);
+        out.push(bb);
+        i += 4;
+    }
+    out
+}
+
+fn make_raster_source(
+    w_px: u32,
+    h_px: u32,
+    rgb: Vec<u8>,
+    dpi_x: f32,
+    dpi_y: f32,
+    color_space: ImageColorSpace,
+) -> SourcePage {
+    let width_pt = w_px as f32 / dpi_x * 72.0;
+    let height_pt = h_px as f32 / dpi_y * 72.0;
+    SourcePage {
+        width_pt,
+        height_pt,
+        kind: SourceKind::Raster {
+            pixels: rgb,
+            width_px: w_px,
+            height_px: h_px,
+            color_space,
+        },
+    }
+}
+
+fn extract_psd_embedded_profile(bytes: &[u8]) -> Option<Vec<u8>> {
+    if bytes.len() < 34 {
+        return None;
+    }
+    let cmd_len = u32::from_be_bytes(bytes[26..30].try_into().ok()?) as usize;
+    let header_end = 30usize.checked_add(cmd_len)?;
+    let resources_off = header_end.checked_add(4)?;
+    if resources_off > bytes.len() {
+        return None;
+    }
+    let reslen = u32::from_be_bytes(bytes[header_end..resources_off].try_into().ok()?) as usize;
+    let resources_end = resources_off.checked_add(reslen)?;
+    if resources_end > bytes.len() {
+        return None;
+    }
+    let mut pos = resources_off;
+    while pos + 10 <= resources_end {
+        if &bytes[pos..pos + 4] != b"8BIM" {
+            break;
+        }
+        let rid = u16::from_be_bytes(bytes[pos + 4..pos + 6].try_into().ok()?) as u32;
+        let name_len = bytes[pos + 6] as usize;
+        let mut field = 1usize + name_len;
+        if field % 2 == 1 {
+            field += 1;
+        }
+        let size_off = pos + 6 + field;
+        if size_off + 4 > resources_end {
+            break;
+        }
+        let size = u32::from_be_bytes(bytes[size_off..size_off + 4].try_into().ok()?) as usize;
+        let data_off = size_off + 4;
+        if data_off + size > resources_end {
+            break;
+        }
+        if rid == 0x040f {
+            return Some(bytes[data_off..data_off + size].to_vec());
+        }
+        pos = data_off + size;
+        if pos % 2 == 1 {
+            pos += 1;
+        }
+    }
+    None
+}
+
+fn cmyk_icc_to_rgb(profile_bytes: &[u8], cmyk: &[u8]) -> Result<Vec<u8>> {
+    let source_profile = ColorProfile::new_from_slice(profile_bytes)
+        .map_err(|e| ImposerError::Parse(e.to_string()))?;
+    let destination_profile = ColorProfile::new_srgb();
+    let transform = source_profile
+        .create_transform_8bit(
+            Layout::Rgba,
+            &destination_profile,
+            Layout::Rgb,
+            TransformOptions::default(),
+        )
+        .map_err(|e| ImposerError::Parse(e.to_string()))?;
+    let chunks = cmyk.len() / 4;
+    let mut rgb = vec![0u8; chunks * 3];
+    transform
+        .transform(cmyk, &mut rgb)
+        .map_err(|e| ImposerError::Parse(e.to_string()))?;
+    Ok(rgb)
+}

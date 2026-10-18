@@ -1,5 +1,5 @@
 use clap::Parser;
-use imposer::{ImpositionConfig, impose};
+use imposer::{ImpositionConfig, impose_sources, sources_from_bytes};
 use std::fs;
 use std::path::PathBuf;
 
@@ -13,7 +13,7 @@ mod tui;
 )]
 struct Cli {
     #[arg(short, long)]
-    input: Option<PathBuf>,
+    input: Vec<PathBuf>,
 
     #[arg(short, long)]
     output: Option<PathBuf>,
@@ -43,7 +43,7 @@ struct Cli {
 fn main() {
     let cli = Cli::parse();
 
-    if cli.tui || cli.input.is_none() || cli.output.is_none() {
+    if cli.tui || cli.input.is_empty() || cli.output.is_none() {
         if let Err(e) = tui::run() {
             eprintln!("erreur TUI : {e}");
             std::process::exit(1);
@@ -51,13 +51,23 @@ fn main() {
         return;
     }
 
-    let input = cli.input.unwrap();
     let output = cli.output.unwrap();
 
-    let input = match fs::read(&input) {
-        Ok(b) => b,
+    let mut inputs: Vec<Vec<u8>> = Vec::new();
+    for p in &cli.input {
+        match fs::read(p) {
+            Ok(b) => inputs.push(b),
+            Err(e) => {
+                eprintln!("erreur lecture entrée {} : {e}", p.display());
+                std::process::exit(1);
+            }
+        }
+    }
+
+    let sources = match sources_from_bytes(&inputs) {
+        Ok(s) => s,
         Err(e) => {
-            eprintln!("erreur lecture entrée : {e}");
+            eprintln!("erreur : {e}");
             std::process::exit(1);
         }
     };
@@ -71,7 +81,7 @@ fn main() {
         rotate_copies: !cli.no_rotate_copies,
     };
 
-    match impose(&input, &config) {
+    match impose_sources(&sources, &config) {
         Ok(bytes) => {
             if let Err(e) = fs::write(&output, &bytes) {
                 eprintln!("erreur écriture sortie : {e}");

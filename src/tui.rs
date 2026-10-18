@@ -4,7 +4,7 @@ use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
 use imposer::config::{DocumentOrientation, ImpositionConfig, SheetOrientation, SheetSize};
-use imposer::{ImposerError, Result, impose};
+use imposer::{ImposerError, Result, impose_sources, sources_from_bytes};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout};
@@ -224,7 +224,12 @@ impl App {
                     let ext_ok = path
                         .extension()
                         .and_then(|e| e.to_str())
-                        .map(|e| e.eq_ignore_ascii_case("pdf"))
+                        .map(|e| {
+                            matches!(
+                                e.to_ascii_lowercase().as_str(),
+                                "pdf" | "png" | "jpg" | "jpeg" | "psd"
+                            )
+                        })
                         .unwrap_or(false);
                     if ext_ok {
                         self.input = Some(path.clone());
@@ -374,6 +379,14 @@ impl App {
             }
         };
 
+        let sources = match sources_from_bytes(&[input_bytes]) {
+            Ok(s) => s,
+            Err(e) => {
+                self.status = format!("Erreur : {e}");
+                return;
+            }
+        };
+
         let config = ImpositionConfig {
             sheet_size: self.options.sheet,
             sheet_orientation: self.options.sheet_orientation,
@@ -383,7 +396,7 @@ impl App {
             rotate_copies: self.options.rotate,
         };
 
-        match impose(&input_bytes, &config) {
+        match impose_sources(&sources, &config) {
             Ok(bytes) => match fs::write(&self.output, &bytes) {
                 Ok(()) => {
                     self.status = format!("PDF généré : {} ({} octets)", self.output, bytes.len());

@@ -1,6 +1,6 @@
 # Imposer
 
-Application Rust d'imposition de documents PDF sur des planches aux formats A4, A3 et SRA3.
+Application Rust d'imposition de documents (PDF, PNG, JPEG, PSD) sur des planches aux formats A4, A3 et SRA3.
 
 ## Fonctionnalités
 
