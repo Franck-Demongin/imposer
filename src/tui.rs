@@ -1,4 +1,7 @@
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{
+    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind,
+    KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
 use crossterm::execute;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
@@ -7,20 +10,21 @@ use imposer::config::{DocumentOrientation, ImpositionConfig, SheetOrientation, S
 use imposer::{ImposerError, Result, impose_sources, sources_from_bytes};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
-use ratatui::layout::{Constraint, Direction, Layout};
+use ratatui::layout::{Alignment, Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Line;
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
+use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc;
 
 struct RestoreTerminal;
 
 impl Drop for RestoreTerminal {
     fn drop(&mut self) {
         let _ = disable_raw_mode();
-        let _ = execute!(io::stdout(), LeaveAlternateScreen);
+        let _ = execute!(io::stdout(), DisableMouseCapture, LeaveAlternateScreen);
     }
 }
 
@@ -139,6 +143,10 @@ struct App {
     selected_option: usize,
     status: String,
     should_quit: bool,
+    run_button_rect: Option<ratatui::layout::Rect>,
+    busy: bool,
+    busy_frame: usize,
+    busy_rx: Option<mpsc::Receiver<String>>,
 }
 
 fn insert_char_at(text: &mut String, cursor: &mut usize, c: char) {
@@ -187,6 +195,10 @@ impl App {
                 "Bienvenue. ↑↓ naviguer, Entrée ouvrir/sélectionner, Tab changer le focus, q quitter.",
             ),
             should_quit: false,
+            run_button_rect: None,
+            busy: false,
+            busy_frame: 0,
+            busy_rx: None,
         }
     }
 
@@ -437,10 +449,23 @@ impl App {
 
     fn handle_run_key(&mut self, key: KeyEvent) {
         match key.code {
-            KeyCode::Enter | KeyCode::Char('g') | KeyCode::Char('G') => {
+            KeyCode::Enter | KeyCode::Char(' ') | KeyCode::Char('g') | KeyCode::Char('G') => {
                 self.run_imposition();
             }
             _ => {}
+        }
+    }
+
+    fn poll_busy(&mut self) {
+        if !self.busy {
+            return;
+        }
+        if let Some(rx) = &self.busy_rx
+            && let Ok(status) = rx.try_recv()
+        {
+            self.status = status;
+            self.busy = false;
+            self.busy_rx = None;
         }
     }
 
@@ -519,6 +544,10 @@ impl App {
     }
 
     fn run_imposition(&mut self) {
+        if self.busy {
+            self.status = String::from("Génération déjà en cours...");
+            return;
+        }
         if self.sources.is_empty() {
             self.status = String::from("Aucun fichier source sélectionné.");
             return;
@@ -540,70 +569,49 @@ impl App {
 
         self.status = String::from("Exécution en cours...");
 
-        let mut input_bytes = Vec::with_capacity(self.sources.len());
-        for path in &self.sources {
-            match fs::read(path) {
-                Ok(b) => input_bytes.push(b),
-                Err(e) => {
-                    self.status = format!("Erreur lecture {} : {e}", path.display());
-                    return;
-                }
-            }
+        let source_paths = self.sources.clone();
+        let sheet = self.options.sheet;
+        let sheet_orientation = self.options.sheet_orientation;
+        let document_orientation = self.options.document_orientation;
+        let bleed = self.options.bleed;
+        let safety = self.options.safety;
+        let rotate = self.options.rotate;
+
+        let (tx, rx) = mpsc::channel();
+        self.busy_rx = Some(rx);
+        self.busy = true;
+        self.busy_frame = 0;
+
+        std::thread::spawn(move || {
+            let status = run_imposition_work(
+                source_paths,
+                destination,
+                sheet,
+                sheet_orientation,
+                document_orientation,
+                bleed,
+                safety,
+                rotate,
+            );
+            let _ = tx.send(status);
+        });
+    }
+
+    fn handle_mouse(&mut self, mouse: MouseEvent) {
+        if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+            return;
         }
-
-        let selected_count = self.sources.len();
-        let mut sources = Vec::new();
-        for (offset, bytes) in input_bytes.into_iter().enumerate() {
-            match sources_from_bytes(std::slice::from_ref(&bytes)) {
-                Ok(parsed) => {
-                    if selected_count > 1 && parsed.len() > 1 {
-                        // Plusieurs sources choisies: chaque PDF contribue sa première page.
-                        if let Some(first) = parsed.first() {
-                            sources.push(first.clone());
-                        } else {
-                            self.status = format!(
-                                "Erreur : source vide pour \"{}\".",
-                                self.sources[offset].display()
-                            );
-                            return;
-                        }
-                    } else {
-                        sources.extend(parsed);
-                    }
-                }
-                Err(e) => {
-                    self.status =
-                        format!("Erreur source \"{}\" : {e}", self.sources[offset].display());
-                    return;
-                }
-            }
+        if self.busy {
+            return;
         }
-
-        let config = ImpositionConfig {
-            sheet_size: self.options.sheet,
-            sheet_orientation: self.options.sheet_orientation,
-            bleed_mm: self.options.bleed,
-            safety_margin_mm: self.options.safety,
-            document_orientation: self.options.document_orientation,
-            rotate_copies: self.options.rotate,
-        };
-
-        match impose_sources(&sources, &config) {
-            Ok(bytes) => match fs::write(&destination, &bytes) {
-                Ok(()) => {
-                    self.status = format!(
-                        "PDF généré : {} ({} octets)",
-                        destination.display(),
-                        bytes.len()
-                    );
-                }
-                Err(e) => {
-                    self.status = format!("Erreur écriture : {e}");
-                }
-            },
-            Err(e) => {
-                self.status = format!("Erreur : {e}");
-            }
+        if let Some(rect) = self.run_button_rect
+            && mouse.column >= rect.x
+            && mouse.column < rect.x + rect.width
+            && mouse.row >= rect.y
+            && mouse.row < rect.y + rect.height
+        {
+            self.focus = Focus::Run;
+            self.run_imposition();
         }
     }
 
@@ -617,7 +625,8 @@ impl App {
                 Constraint::Length(3),
                 Constraint::Length(3),
                 Constraint::Length(3),
-                Constraint::Length(4),
+                Constraint::Length(3),
+                Constraint::Length(5),
             ])
             .split(area);
 
@@ -748,12 +757,50 @@ impl App {
             self.focus == Focus::OutputName,
         );
 
-        let help = "Raccourcis: Tab focus | ↑↓ | Entrée ajoute (max. 2) | textes: ←→ déplacement, Début/Fin, RetArr/Del | o dossier courant | d dossier sélectionné | Suppr source | g exécuter | q quitter";
-        let status_text = format!("{}\n{}", self.status, help);
+        let button_style = if self.focus == Focus::Run {
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Green)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::Green)
+        };
+        f.render_widget(Clear, rows[5]);
+        let button_row = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Min(0),
+                Constraint::Length(18),
+                Constraint::Min(0),
+            ])
+            .split(rows[5]);
+        let button_area = button_row[1];
+        let button = Paragraph::new("Générer")
+            .style(button_style)
+            .alignment(Alignment::Center)
+            .block(Block::default().borders(Borders::ALL));
+        f.render_widget(button, button_area);
+        self.run_button_rect = Some(button_area);
+
+        let help = "Raccourcis: Tab focus | ↑↓ | Entrée ajoute (max. 2) | textes: ←→ déplacement, Début/Fin, RetArr/Del | o dossier courant | d dossier sélectionné | Suppr source | g/Entrée/Tab+Entrée générer | clic souris sur Générer | q quitter";
+        let displayed_status = if self.busy {
+            let spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠏"];
+            format!(
+                "{}  {}",
+                spinner[self.busy_frame % spinner.len()],
+                self.status
+            )
+        } else {
+            self.status.clone()
+        };
+        if self.busy {
+            self.busy_frame = self.busy_frame.wrapping_add(1);
+        }
+        let status_text = format!("{}\n{}", displayed_status, help);
         let status = Paragraph::new(status_text)
             .block(Block::default().borders(Borders::ALL).title("Statut"))
             .wrap(ratatui::widgets::Wrap { trim: true });
-        f.render_widget(status, rows[5]);
+        f.render_widget(status, rows[6]);
     }
 }
 
@@ -793,6 +840,76 @@ fn render_text_field(
     f.render_widget(widget, area);
 }
 
+#[allow(clippy::too_many_arguments)]
+fn run_imposition_work(
+    source_paths: Vec<PathBuf>,
+    destination: PathBuf,
+    sheet: SheetSize,
+    sheet_orientation: SheetOrientation,
+    document_orientation: DocumentOrientation,
+    bleed: f32,
+    safety: f32,
+    rotate: bool,
+) -> String {
+    let mut input_bytes = Vec::with_capacity(source_paths.len());
+    for path in &source_paths {
+        match fs::read(path) {
+            Ok(b) => input_bytes.push(b),
+            Err(e) => {
+                return format!("Erreur lecture {} : {e}", path.display());
+            }
+        }
+    }
+
+    let selected_count = source_paths.len();
+    let mut sources = Vec::new();
+    for (offset, bytes) in input_bytes.into_iter().enumerate() {
+        match sources_from_bytes(std::slice::from_ref(&bytes)) {
+            Ok(parsed) => {
+                if selected_count > 1 && parsed.len() > 1 {
+                    // Plusieurs sources choisies: chaque PDF contribue sa première page.
+                    if let Some(first) = parsed.first() {
+                        sources.push(first.clone());
+                    } else {
+                        return format!(
+                            "Erreur : source vide pour \"{}\".",
+                            source_paths[offset].display()
+                        );
+                    }
+                } else {
+                    sources.extend(parsed);
+                }
+            }
+            Err(e) => {
+                return format!("Erreur source \"{}\" : {e}", source_paths[offset].display());
+            }
+        }
+    }
+
+    let config = ImpositionConfig {
+        sheet_size: sheet,
+        sheet_orientation,
+        bleed_mm: bleed,
+        safety_margin_mm: safety,
+        document_orientation,
+        rotate_copies: rotate,
+    };
+
+    match impose_sources(&sources, &config) {
+        Ok(bytes) => match fs::write(&destination, &bytes) {
+            Ok(()) => {
+                format!(
+                    "PDF généré : {} ({} octets)",
+                    destination.display(),
+                    bytes.len()
+                )
+            }
+            Err(e) => format!("Erreur écriture : {e}"),
+        },
+        Err(e) => format!("Erreur : {e}"),
+    }
+}
+
 fn sheet_name(v: SheetSize) -> &'static str {
     match v {
         SheetSize::A4 => "A4",
@@ -819,7 +936,8 @@ fn document_orientation_name(v: DocumentOrientation) -> &'static str {
 pub fn run() -> Result<()> {
     enable_raw_mode().map_err(|e| ImposerError::Generation(e.to_string()))?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen).map_err(|e| ImposerError::Generation(e.to_string()))?;
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)
+        .map_err(|e| ImposerError::Generation(e.to_string()))?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal =
         Terminal::new(backend).map_err(|e| ImposerError::Generation(e.to_string()))?;
@@ -831,16 +949,25 @@ pub fn run() -> Result<()> {
             .draw(|f| app.ui(f))
             .map_err(|e| ImposerError::Generation(e.to_string()))?;
 
+        app.poll_busy();
+
         if app.should_quit {
             break;
         }
 
-        if event::poll(std::time::Duration::from_millis(200))
-            .map_err(|e| ImposerError::Generation(e.to_string()))?
-            && let Event::Key(key) =
-                event::read().map_err(|e| ImposerError::Generation(e.to_string()))?
-        {
-            app.handle_key(key);
+        let poll_timeout = if app.busy {
+            std::time::Duration::from_millis(80)
+        } else {
+            std::time::Duration::from_millis(200)
+        };
+
+        if event::poll(poll_timeout).map_err(|e| ImposerError::Generation(e.to_string()))? {
+            match event::read().map_err(|e| ImposerError::Generation(e.to_string()))? {
+                Event::Key(key) => app.handle_key(key),
+                Event::Mouse(mouse) => app.handle_mouse(mouse),
+                Event::Resize(_, _) => {}
+                _ => {}
+            }
         }
     }
 
