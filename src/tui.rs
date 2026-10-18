@@ -27,7 +27,8 @@ impl Drop for RestoreTerminal {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Focus {
     Browser,
-    Output,
+    OutputDir,
+    OutputName,
     Options,
     Run,
 }
@@ -129,7 +130,10 @@ impl Browser {
 struct App {
     browser: Browser,
     sources: Vec<PathBuf>,
-    output: String,
+    output_dir: String,
+    output_dir_cursor: usize,
+    output_name: String,
+    output_name_cursor: usize,
     options: OptionsState,
     focus: Focus,
     selected_option: usize,
@@ -137,12 +141,45 @@ struct App {
     should_quit: bool,
 }
 
+fn insert_char_at(text: &mut String, cursor: &mut usize, c: char) {
+    let chars: Vec<char> = text.chars().collect();
+    let pos = (*cursor).min(chars.len());
+    let mut next = String::with_capacity(text.len() + c.len_utf8());
+    next.extend(chars[..pos].iter().copied());
+    next.push(c);
+    next.extend(chars[pos..].iter().copied());
+    *text = next;
+    *cursor = pos + 1;
+}
+
+fn backspace_at(text: &mut String, cursor: &mut usize) {
+    let mut chars: Vec<char> = text.chars().collect();
+    let pos = (*cursor).min(chars.len());
+    if pos > 0 {
+        chars.remove(pos - 1);
+        *cursor = pos - 1;
+        *text = chars.into_iter().collect();
+    }
+}
+
+fn delete_at(text: &mut String, cursor: &mut usize) {
+    let mut chars: Vec<char> = text.chars().collect();
+    let pos = (*cursor).min(chars.len());
+    if pos < chars.len() {
+        chars.remove(pos);
+        *text = chars.into_iter().collect();
+    }
+}
+
 impl App {
     fn new() -> Self {
         Self {
             browser: Browser::new(),
             sources: Vec::new(),
-            output: String::new(),
+            output_dir: String::new(),
+            output_dir_cursor: 0,
+            output_name: String::new(),
+            output_name_cursor: 0,
             options: OptionsState::default(),
             focus: Focus::Browser,
             selected_option: 0,
@@ -155,8 +192,9 @@ impl App {
 
     fn next_focus(&mut self) {
         self.focus = match self.focus {
-            Focus::Browser => Focus::Output,
-            Focus::Output => Focus::Options,
+            Focus::Browser => Focus::OutputDir,
+            Focus::OutputDir => Focus::OutputName,
+            Focus::OutputName => Focus::Options,
             Focus::Options => Focus::Run,
             Focus::Run => Focus::Browser,
         };
@@ -165,8 +203,9 @@ impl App {
     fn prev_focus(&mut self) {
         self.focus = match self.focus {
             Focus::Browser => Focus::Run,
-            Focus::Output => Focus::Browser,
-            Focus::Options => Focus::Output,
+            Focus::OutputDir => Focus::Browser,
+            Focus::OutputName => Focus::OutputDir,
+            Focus::Options => Focus::OutputName,
             Focus::Run => Focus::Options,
         };
     }
@@ -176,7 +215,7 @@ impl App {
             return;
         }
 
-        if self.focus != Focus::Output
+        if !matches!(self.focus, Focus::OutputDir | Focus::OutputName)
             && (key.code == KeyCode::Char('q') || key.code == KeyCode::Esc)
         {
             self.should_quit = true;
@@ -199,7 +238,9 @@ impl App {
             _ => {}
         }
 
-        if key.code == KeyCode::Delete {
+        if key.code == KeyCode::Delete
+            && !matches!(self.focus, Focus::OutputDir | Focus::OutputName)
+        {
             self.sources.pop();
             self.status = if self.sources.is_empty() {
                 "Aucune source sélectionnée (max. 2).".to_string()
@@ -214,7 +255,8 @@ impl App {
 
         match self.focus {
             Focus::Browser => self.handle_browser_key(key),
-            Focus::Output => self.handle_output_key(key),
+            Focus::OutputDir => self.handle_output_dir_key(key),
+            Focus::OutputName => self.handle_output_name_key(key),
             Focus::Options => self.handle_options_key(key),
             Focus::Run => self.handle_run_key(key),
         }
@@ -253,16 +295,18 @@ impl App {
                                 "Maximum de 2 sources atteint. Utilisez Suppr pour retirer la dernière."
                                     .to_string();
                         } else {
-                            if self.sources.is_empty() {
+                            if self.output_dir.is_empty() {
+                                let parent = selected_path.parent().unwrap_or(Path::new("."));
+                                self.output_dir = parent.display().to_string();
+                                self.output_dir_cursor = self.output_dir.chars().count();
+                            }
+                            if self.output_name.is_empty() {
                                 let stem = selected_path
                                     .file_stem()
                                     .map(|s| s.to_string_lossy().to_string())
                                     .unwrap_or_else(|| String::from("output"));
-                                let parent = selected_path.parent().unwrap_or(Path::new("."));
-                                self.output = parent
-                                    .join(format!("{}_imposed.pdf", stem))
-                                    .display()
-                                    .to_string();
+                                self.output_name = format!("{}_imposed.pdf", stem);
+                                self.output_name_cursor = self.output_name.chars().count();
                             }
                             self.sources.push(selected_path.clone());
                             self.status = format!(
@@ -278,23 +322,90 @@ impl App {
             }
             KeyCode::Backspace | KeyCode::Left => self.browser.go_up(),
             KeyCode::Char('o') | KeyCode::Char('O') => {
-                let proposed = self.browser.cwd.join("output.pdf");
-                self.output = proposed.display().to_string();
+                self.output_dir = self.browser.cwd.display().to_string();
+                self.output_dir_cursor = self.output_dir.chars().count();
+                if self.output_name.is_empty() {
+                    self.output_name = String::from("output.pdf");
+                    self.output_name_cursor = self.output_name.chars().count();
+                }
                 self.status = format!("Dossier de sortie : {}", self.browser.cwd.display());
+            }
+            KeyCode::Char('d') | KeyCode::Char('D') => {
+                let target = self
+                    .browser
+                    .entries
+                    .get(self.browser.selected)
+                    .cloned()
+                    .unwrap_or_else(|| self.browser.cwd.clone());
+                let directory = if target.is_dir() {
+                    target
+                } else {
+                    target.parent().unwrap_or(&self.browser.cwd).to_path_buf()
+                };
+                self.output_dir = directory.display().to_string();
+                self.output_dir_cursor = self.output_dir.chars().count();
+                if self.output_name.is_empty() {
+                    self.output_name = String::from("output.pdf");
+                    self.output_name_cursor = self.output_name.chars().count();
+                }
+                self.status = format!("Dossier de sortie : {}", directory.display());
             }
             _ => {}
         }
     }
 
-    fn handle_output_key(&mut self, key: KeyEvent) {
+    fn handle_output_dir_key(&mut self, key: KeyEvent) {
         match key.code {
-            KeyCode::Char(c) => self.output.push(c),
-            KeyCode::Backspace => {
-                self.output.pop();
+            KeyCode::Char(c) if !c.is_control() => {
+                insert_char_at(&mut self.output_dir, &mut self.output_dir_cursor, c);
             }
-            KeyCode::Enter => {
-                self.status = format!("Sortie : {}", self.output);
+            KeyCode::Backspace => backspace_at(&mut self.output_dir, &mut self.output_dir_cursor),
+            KeyCode::Delete => delete_at(&mut self.output_dir, &mut self.output_dir_cursor),
+            KeyCode::Left => {
+                if self.output_dir_cursor > 0 {
+                    self.output_dir_cursor -= 1;
+                }
             }
+            KeyCode::Right => {
+                let count = self.output_dir.chars().count();
+                if self.output_dir_cursor < count {
+                    self.output_dir_cursor += 1;
+                }
+            }
+            KeyCode::Home => self.output_dir_cursor = 0,
+            KeyCode::End => self.output_dir_cursor = self.output_dir.chars().count(),
+            KeyCode::Enter => match self.output_path() {
+                Some(path) => self.status = format!("Sortie : {}", path.display()),
+                None => self.status = String::from("Dossier ou nom de sortie invalide."),
+            },
+            _ => {}
+        }
+    }
+
+    fn handle_output_name_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Char(c) if !c.is_control() => {
+                insert_char_at(&mut self.output_name, &mut self.output_name_cursor, c);
+            }
+            KeyCode::Backspace => backspace_at(&mut self.output_name, &mut self.output_name_cursor),
+            KeyCode::Delete => delete_at(&mut self.output_name, &mut self.output_name_cursor),
+            KeyCode::Left => {
+                if self.output_name_cursor > 0 {
+                    self.output_name_cursor -= 1;
+                }
+            }
+            KeyCode::Right => {
+                let count = self.output_name.chars().count();
+                if self.output_name_cursor < count {
+                    self.output_name_cursor += 1;
+                }
+            }
+            KeyCode::Home => self.output_name_cursor = 0,
+            KeyCode::End => self.output_name_cursor = self.output_name.chars().count(),
+            KeyCode::Enter => match self.output_path() {
+                Some(path) => self.status = format!("Sortie : {}", path.display()),
+                None => self.status = String::from("Dossier ou nom de sortie invalide."),
+            },
             _ => {}
         }
     }
@@ -384,13 +495,46 @@ impl App {
         }
     }
 
+    fn output_path(&self) -> Option<PathBuf> {
+        let directory = self.output_dir.trim();
+        let raw_name = self.output_name.trim();
+        if directory.is_empty() || raw_name.is_empty() {
+            return None;
+        }
+        let name_path = Path::new(raw_name);
+        let components: Vec<_> = name_path.components().collect();
+        if name_path.is_absolute()
+            || components.is_empty()
+            || components.len() != 1
+            || raw_name == "."
+            || raw_name == ".."
+        {
+            return None;
+        }
+        let mut name = raw_name.to_string();
+        if !raw_name.to_ascii_lowercase().ends_with(".pdf") {
+            name.push_str(".pdf");
+        }
+        Some(PathBuf::from(directory).join(name))
+    }
+
     fn run_imposition(&mut self) {
         if self.sources.is_empty() {
             self.status = String::from("Aucun fichier source sélectionné.");
             return;
         }
-        if self.output.trim().is_empty() {
-            self.status = String::from("Chemin de sortie vide.");
+        let destination = match self.output_path() {
+            Some(path) => path,
+            None => {
+                self.status = String::from("Dossier ou nom de sortie invalide.");
+                return;
+            }
+        };
+        if let Some(parent) = destination.parent()
+            && !parent.as_os_str().is_empty()
+            && !parent.is_dir()
+        {
+            self.status = format!("Dossier de sortie introuvable : {}", parent.display());
             return;
         }
 
@@ -445,9 +589,13 @@ impl App {
         };
 
         match impose_sources(&sources, &config) {
-            Ok(bytes) => match fs::write(&self.output, &bytes) {
+            Ok(bytes) => match fs::write(&destination, &bytes) {
                 Ok(()) => {
-                    self.status = format!("PDF généré : {} ({} octets)", self.output, bytes.len());
+                    self.status = format!(
+                        "PDF généré : {} ({} octets)",
+                        destination.display(),
+                        bytes.len()
+                    );
                 }
                 Err(e) => {
                     self.status = format!("Erreur écriture : {e}");
@@ -466,6 +614,7 @@ impl App {
             .constraints([
                 Constraint::Length(3),
                 Constraint::Min(7),
+                Constraint::Length(3),
                 Constraint::Length(3),
                 Constraint::Length(3),
                 Constraint::Length(4),
@@ -581,26 +730,67 @@ impl App {
             .wrap(ratatui::widgets::Wrap { trim: true });
         f.render_widget(sources_widget, rows[2]);
 
-        let output_block = Block::default()
-            .borders(Borders::ALL)
-            .title("Fichier de sortie");
-        let output_style = if self.focus == Focus::Output {
-            Style::default().fg(Color::Yellow)
-        } else {
-            Style::default()
-        };
-        let output_widget = Paragraph::new(self.output.clone())
-            .style(output_style)
-            .block(output_block);
-        f.render_widget(output_widget, rows[3]);
+        render_text_field(
+            f,
+            rows[3],
+            "Dossier de sortie",
+            &self.output_dir,
+            self.output_dir_cursor,
+            self.focus == Focus::OutputDir,
+        );
 
-        let help = "Raccourcis: Tab focus | ↑↓ | Entrée ajoute (max. 2) | ←→ option | o dossier sortie | Suppr retire dernière | g exécuter | q quitter";
+        render_text_field(
+            f,
+            rows[4],
+            "Nom de sortie",
+            &self.output_name,
+            self.output_name_cursor,
+            self.focus == Focus::OutputName,
+        );
+
+        let help = "Raccourcis: Tab focus | ↑↓ | Entrée ajoute (max. 2) | textes: ←→ déplacement, Début/Fin, RetArr/Del | o dossier courant | d dossier sélectionné | Suppr source | g exécuter | q quitter";
         let status_text = format!("{}\n{}", self.status, help);
         let status = Paragraph::new(status_text)
             .block(Block::default().borders(Borders::ALL).title("Statut"))
             .wrap(ratatui::widgets::Wrap { trim: true });
-        f.render_widget(status, rows[4]);
+        f.render_widget(status, rows[5]);
     }
+}
+
+fn render_text_field(
+    f: &mut ratatui::Frame,
+    area: ratatui::layout::Rect,
+    title: &str,
+    value: &str,
+    cursor: usize,
+    focused: bool,
+) {
+    let chars: Vec<char> = value.chars().collect();
+    let marker = if focused { "│" } else { " " };
+    let cursor = cursor.min(chars.len());
+    let mut text = String::new();
+    for idx in 0..=chars.len() {
+        if idx == cursor {
+            text.push_str(marker);
+        }
+        if idx < chars.len() {
+            text.push(chars[idx]);
+        }
+    }
+    if text.is_empty() {
+        text.push_str(marker);
+    }
+    let style = if focused {
+        Style::default().fg(Color::Yellow)
+    } else {
+        Style::default()
+    };
+    let widget = Paragraph::new(text).style(style).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(title.to_string()),
+    );
+    f.render_widget(widget, area);
 }
 
 fn sheet_name(v: SheetSize) -> &'static str {
