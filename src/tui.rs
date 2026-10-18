@@ -128,7 +128,7 @@ impl Browser {
 
 struct App {
     browser: Browser,
-    input: Option<PathBuf>,
+    sources: Vec<PathBuf>,
     output: String,
     options: OptionsState,
     focus: Focus,
@@ -141,7 +141,7 @@ impl App {
     fn new() -> Self {
         Self {
             browser: Browser::new(),
-            input: None,
+            sources: Vec::new(),
             output: String::new(),
             options: OptionsState::default(),
             focus: Focus::Browser,
@@ -199,6 +199,19 @@ impl App {
             _ => {}
         }
 
+        if key.code == KeyCode::Delete {
+            self.sources.pop();
+            self.status = if self.sources.is_empty() {
+                "Aucune source sélectionnée (max. 2).".to_string()
+            } else {
+                format!(
+                    "Dernière source retirée. {} source(s) restante(s).",
+                    self.sources.len()
+                )
+            };
+            return;
+        }
+
         match self.focus {
             Focus::Browser => self.handle_browser_key(key),
             Focus::Output => self.handle_output_key(key),
@@ -232,17 +245,32 @@ impl App {
                         })
                         .unwrap_or(false);
                     if ext_ok {
-                        self.input = Some(path.clone());
-                        let stem = path
-                            .file_stem()
-                            .map(|s| s.to_string_lossy().to_string())
-                            .unwrap_or_else(|| String::from("output"));
-                        let parent = path.parent().unwrap_or(Path::new("."));
-                        self.output = parent
-                            .join(format!("{}_imposed.pdf", stem))
-                            .display()
-                            .to_string();
-                        self.status = format!("Source sélectionné : {}", path.display());
+                        let selected_path = path.clone();
+                        if self.sources.contains(&selected_path) {
+                            self.status = "Source déjà sélectionnée.".to_string();
+                        } else if self.sources.len() >= 2 {
+                            self.status =
+                                "Maximum de 2 sources atteint. Utilisez Suppr pour retirer la dernière."
+                                    .to_string();
+                        } else {
+                            if self.sources.is_empty() {
+                                let stem = selected_path
+                                    .file_stem()
+                                    .map(|s| s.to_string_lossy().to_string())
+                                    .unwrap_or_else(|| String::from("output"));
+                                let parent = selected_path.parent().unwrap_or(Path::new("."));
+                                self.output = parent
+                                    .join(format!("{}_imposed.pdf", stem))
+                                    .display()
+                                    .to_string();
+                            }
+                            self.sources.push(selected_path.clone());
+                            self.status = format!(
+                                "Source {} sélectionnée : {}",
+                                self.sources.len(),
+                                selected_path.display()
+                            );
+                        }
                     } else {
                         self.status = String::from("Fichier non PDF ignoré.");
                     }
@@ -357,13 +385,10 @@ impl App {
     }
 
     fn run_imposition(&mut self) {
-        let input_path = match &self.input {
-            Some(p) => p.clone(),
-            None => {
-                self.status = String::from("Aucun fichier source sélectionné.");
-                return;
-            }
-        };
+        if self.sources.is_empty() {
+            self.status = String::from("Aucun fichier source sélectionné.");
+            return;
+        }
         if self.output.trim().is_empty() {
             self.status = String::from("Chemin de sortie vide.");
             return;
@@ -371,21 +396,44 @@ impl App {
 
         self.status = String::from("Exécution en cours...");
 
-        let input_bytes = match fs::read(&input_path) {
-            Ok(b) => b,
-            Err(e) => {
-                self.status = format!("Erreur lecture : {e}");
-                return;
+        let mut input_bytes = Vec::with_capacity(self.sources.len());
+        for path in &self.sources {
+            match fs::read(path) {
+                Ok(b) => input_bytes.push(b),
+                Err(e) => {
+                    self.status = format!("Erreur lecture {} : {e}", path.display());
+                    return;
+                }
             }
-        };
+        }
 
-        let sources = match sources_from_bytes(&[input_bytes]) {
-            Ok(s) => s,
-            Err(e) => {
-                self.status = format!("Erreur : {e}");
-                return;
+        let selected_count = self.sources.len();
+        let mut sources = Vec::new();
+        for (offset, bytes) in input_bytes.into_iter().enumerate() {
+            match sources_from_bytes(std::slice::from_ref(&bytes)) {
+                Ok(parsed) => {
+                    if selected_count > 1 && parsed.len() > 1 {
+                        // Plusieurs sources choisies: chaque PDF contribue sa première page.
+                        if let Some(first) = parsed.first() {
+                            sources.push(first.clone());
+                        } else {
+                            self.status = format!(
+                                "Erreur : source vide pour \"{}\".",
+                                self.sources[offset].display()
+                            );
+                            return;
+                        }
+                    } else {
+                        sources.extend(parsed);
+                    }
+                }
+                Err(e) => {
+                    self.status =
+                        format!("Erreur source \"{}\" : {e}", self.sources[offset].display());
+                    return;
+                }
             }
-        };
+        }
 
         let config = ImpositionConfig {
             sheet_size: self.options.sheet,
@@ -417,7 +465,8 @@ impl App {
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Length(3),
-                Constraint::Min(8),
+                Constraint::Min(7),
+                Constraint::Length(3),
                 Constraint::Length(3),
                 Constraint::Length(4),
             ])
@@ -513,6 +562,25 @@ impl App {
         }
         f.render_stateful_widget(options_list, main[1], &mut options_state);
 
+        let sources_text = if self.sources.is_empty() {
+            "Aucune source sélectionnée (max. 2).".to_string()
+        } else {
+            self.sources
+                .iter()
+                .enumerate()
+                .map(|(i, path)| format!("{}. {}", i + 1, path.display()))
+                .collect::<Vec<_>>()
+                .join(" | ")
+        };
+        let sources_widget = Paragraph::new(sources_text)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("Sources (max. 2)"),
+            )
+            .wrap(ratatui::widgets::Wrap { trim: true });
+        f.render_widget(sources_widget, rows[2]);
+
         let output_block = Block::default()
             .borders(Borders::ALL)
             .title("Fichier de sortie");
@@ -524,14 +592,14 @@ impl App {
         let output_widget = Paragraph::new(self.output.clone())
             .style(output_style)
             .block(output_block);
-        f.render_widget(output_widget, rows[2]);
+        f.render_widget(output_widget, rows[3]);
 
-        let help = "Raccourcis: Tab focus | ↑↓ | Entrée ouvrir/sélect. | ←→ option | o dossier sortie | g exécuter | q quitter";
+        let help = "Raccourcis: Tab focus | ↑↓ | Entrée ajoute (max. 2) | ←→ option | o dossier sortie | Suppr retire dernière | g exécuter | q quitter";
         let status_text = format!("{}\n{}", self.status, help);
         let status = Paragraph::new(status_text)
             .block(Block::default().borders(Borders::ALL).title("Statut"))
             .wrap(ratatui::widgets::Wrap { trim: true });
-        f.render_widget(status, rows[3]);
+        f.render_widget(status, rows[4]);
     }
 }
 
