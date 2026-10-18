@@ -1,6 +1,6 @@
 # Imposer
 
-Rust CLI/library for imposing PDF, PNG, JPEG/JPG, and PSD documents on A4, A3, and SRA3 sheets (v0.2.2).
+Rust CLI/library for imposing PDF, PNG, JPEG/JPG, and PSD documents on A4, A3, and SRA3 sheets (v0.3.0).
 
 ## Project Overview
 
@@ -117,4 +117,8 @@ the executable with commit-derived notes since the previous tag.
 
 - `target/` and `Cargo.lock` are gitignored in this repository.
 - User-facing UI text is French; Rust identifiers and module names are English.
+- Commit messages are written in English and use Conventional Commits formatting
+  (`feat:`, `fix:`, `ci:`, `chore:`, etc.) so release-note generation and
+  project history stay consistent. Tag names use the `v<version>` form, such as
+  `v0.3.0`.
 ```
