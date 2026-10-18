@@ -27,13 +27,52 @@ formats A4, A3 et SRA3.
 Les dimensions d'entrée sont interprétées telles quelles, y compris le fond perdu déjà
 présent dans le document source.
 
-## Compilation
+## Installation
+
+### Prérequis
+
+Installez Rust via [rustup](https://rustup.rs/) si nécessaire, puis vérifiez
+l'installation :
+
+```sh
+rustc --version
+cargo --version
+```
+
+### Récupérer les sources
+
+```sh
+git clone https://github.com/Franck-Demongin/imposer.git
+cd imposer
+```
+
+### Compiler
 
 ```sh
 cargo build --release
 ```
 
+Le binaire est généré selon le système :
+
+- Linux et macOS : `target/release/imposer`
+- Windows : `target/release/imposer.exe`
+
+### Lancer l'application
+
+- Linux et macOS :
+  ```sh
+  ./target/release/imposer --tui
+  ```
+- Windows (PowerShell) :
+  ```powershell
+  .\target\release\imposer.exe --tui
+  ```
+
+Sans argument ni chemin de sortie, l'application ouvre aussi directement la TUI.
+
 ## Interface texte (TUI)
+
+![Capture de l'interface TUI](assets/screen_tui.png)
 
 ```sh
 ./target/release/imposer --tui
