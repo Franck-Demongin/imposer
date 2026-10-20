@@ -9,20 +9,27 @@ Rust CLI/library for imposing PDF, PNG, JPEG/JPG, and PSD documents on A4, A3, a
 generation.
 
 Supported input handling:
-- PDF: 1 or 2 pages, with preserved resources and OutputIntent profiles
-- PNG and JPEG/JPG: converted to RGB; DPI is read when present, otherwise 300 DPI is used
-- PSD: RGB, grayscale, and CMYK (CMYK with an embedded ICC profile is converted to sRGB)
+- PDF: 1 or 2 pages, with preserved resources, OutputIntent profiles, and ICC-based CMYK profiles
+- PNG and JPEG/JPG: converted to RGB; DPI is read when present, otherwise 300 DPI is used; ICC profiles are ignored (DeviceRGB)
+- PSD: RGB, grayscale, and CMYK; CMYK requires an embedded ICC profile (CMYK without a profile is rejected)
+- All sources in one imposition must have the same color kind (RGB or CMYK)
 - All sources passed to one imposition must have matching dimensions within `0.5 pt`
 
 Main modules:
-- `src/main.rs`: CLI entry point and argument mapping, TUI launch
-- `src/lib.rs`: public exports (`ImpositionConfig`, `impose`, layout helpers)
-- `src/tui.rs`: interactive ratatui/crossterm interface
+- `src/main.rs`: CLI entry point, argument mapping, color/profile reporting, TUI launch
+- `src/lib.rs`: public exports (config, errors, geometry, ICC, import, layout, output, PDF, preflight, profile, source APIs)
+- `src/tui.rs`: interactive ratatui/crossterm interface, source profile reporting
 - `src/config.rs`: sheet/document orientations, bleed, safety margin, copy rotation
 - `src/geometry.rs`: mm/pt conversions
+- `src/icc.rs`: ICC header parsing, profile descriptions, SHA-256 comparison
+- `src/import.rs`: imported page metadata and page box propagation helpers
 - `src/layout.rs`: sheet selection, grid computation, centered placement origins, trim boxes
-- `src/source.rs`: source parsing and dimension detection
-- `src/pdf.rs`: PDF parsing, Form XObject creation, deep resource copying, crop marks, OutputIntent preservation, recto/verso generation
+- `src/source.rs`: format detection, source parsing, dimensions, color kind, PSD CMYK/ICC handling
+- `src/profile.rs`: recursive ICC-based and OutputIntent CMYK profile detection
+- `src/pdf.rs`: PDF parsing, Form XObjects, deep resource copying, ICC raster images, crop marks, OutputIntents, X4 metadata, recto/verso generation
+- `src/preflight.rs`: source and output PDFX checks, color policy, page boxes, annotations
+- `src/output.rs`: alternate output builder based on imported pages (not used by current `pdf.rs` pipeline)
+- `src/numfmt.rs`: numeric formatting helpers for output metadata
 - `src/error.rs`: typed errors
 
 ## Building and Running
@@ -78,6 +85,7 @@ Integration tests are in `tests/integration_test.rs`. Test fixtures are in
 - A single selected PDF source may contribute 1 or 2 pages; when several sources are selected, the TUI keeps only the first page of each source.
 - Source page dimensions already include bleed; layout uses them directly and derives trim boxes as source size minus `2 * bleed`.
 - All supplied sources must have matching dimensions within `0.5 pt`.
+- All supplied sources must have the same color kind: RGB sources stay DeviceRGB; CMYK sources preserve ICC profiles.
 - Bleed values cannot exceed half the source dimensions.
 - Layout candidates are selected by maximum copy count, then minimum waste.
 - The placement grid is centered independently on horizontal and vertical axes; horizontal/vertical gaps can differ.
@@ -85,7 +93,10 @@ Integration tests are in `tests/integration_test.rs`. Test fixtures are in
   180° rotation only when `--document-orientation portrait` is selected;
   otherwise it keeps the same sheet coordinate system. When the 180°
   rotation is applied, crop marks follow the same transform.
-- Deep copying is used for page resources and OutputIntents.
+- Deep copying is used for page resources, hierarchical forms, ICC streams, and OutputIntents.
+- PDF and PSD sources are inspected recursively for GTS_PDFX OutputIntents and ICCBased CMYK profiles; multiple distinct ICC profiles are rejected.
+- PSD CMYK sources require an embedded ICC profile. Mixtures of RGB and CMYK sources are rejected.
+- PDF/X-4 metadata (OutputIntent, ICC-based streams, XMP, Info, `/ID`, and Media/Bleed/Trim boxes) is emitted when every source is CMYK and either the sources share an OutputIntent or the same ICC profile.
 
 ## Crop Marks
 
@@ -103,6 +114,7 @@ Crop marks are derived from unique trim-box edges after optional 90° rotation:
 
 - File browser supports PDF, PNG, JPEG, and PSD sources, with up to 2 selections.
 - Output is configured through separate directory and filename fields; `.pdf` is appended automatically.
+- The detected source color profile is shown when a source is selected and after generation.
 - Options include sheet size, sheet/document orientations, bleed, safety margin, and copy rotation.
 - Generation runs outside the UI loop and shows a braille spinner in the status area while busy; duplicate runs are ignored.
 - A centered `Générer` button supports keyboard and mouse activation.
