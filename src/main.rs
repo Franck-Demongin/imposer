@@ -1,5 +1,5 @@
 use clap::Parser;
-use imposer::{ImpositionConfig, impose_sources, sources_from_bytes};
+use imposer::{ImpositionConfig, SourcePage, impose_sources, sources_from_bytes};
 use std::fs;
 use std::path::PathBuf;
 
@@ -72,6 +72,8 @@ fn main() {
         }
     };
 
+    let color_report: Vec<String> = sources.iter().map(SourcePage::color_label).collect();
+    println!("Profils couleur détectés : {}", color_report.join(" ; "));
     let config = ImpositionConfig {
         sheet_size: cli.sheet,
         sheet_orientation: cli.sheet_orientation,

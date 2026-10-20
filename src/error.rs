@@ -1,6 +1,7 @@
 use thiserror::Error;
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum ImposerError {
     #[error("impossible de lire le PDF : {0}")]
     Parse(String),
@@ -18,6 +19,28 @@ pub enum ImposerError {
     CropMarksMargin(String),
     #[error("erreur d'entrée/sortie : {0}")]
     Io(#[from] std::io::Error),
+    #[error("conflit de couleur des sources : {0}")]
+    MixedSourceColors(String),
+    #[error("aucun profil ICC CMJN détecté")]
+    NoProfile,
+    #[error("plusieurs profils ICC CMJN distincts détectés")]
+    AmbiguousProfile,
+    #[error("page source chiffree non prise en charge")]
+    EncryptedPdf,
+    #[error("flux ICC compressé non supporté : {0}")]
+    UnsupportedFilter(String),
+    #[error("boîtes invalides : {0}")]
+    InvalidBoxes(String),
+    #[error("placement hors feuille : {0}")]
+    OutOfSheet(String),
+    #[error("profil ICC invalide : {0}")]
+    InvalidIcc(String),
+    #[error("cycle détecté lors de la copie d'objet PDF")]
+    CycleDetected,
+    #[error("référence pendante tolérée, remplacée par null")]
+    DanglingReference,
+    #[error("{0}")]
+    Preflight(String),
 }
 
 pub type Result<T> = std::result::Result<T, ImposerError>;

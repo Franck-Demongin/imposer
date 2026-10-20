@@ -7,7 +7,7 @@ use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
 use imposer::config::{DocumentOrientation, ImpositionConfig, SheetOrientation, SheetSize};
-use imposer::{ImposerError, Result, impose_sources, sources_from_bytes};
+use imposer::{ImposerError, Result, SourcePage, impose_sources, sources_from_bytes};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout};
@@ -369,10 +369,20 @@ impl App {
                                 self.output_name_cursor = self.output_name.chars().count();
                             }
                             self.sources.push(selected_path.clone());
+                            let selected_profile = fs::read(&selected_path)
+                                .ok()
+                                .and_then(|bytes| {
+                                    sources_from_bytes(std::slice::from_ref(&bytes))
+                                        .ok()
+                                        .and_then(|parsed| parsed.into_iter().next())
+                                        .map(|source: SourcePage| source.color_label())
+                                })
+                                .unwrap_or_else(|| "profil non détectable".to_string());
                             self.status = format!(
-                                "Source {} sélectionnée : {}",
+                                "Source {} sélectionnée : {} — {}",
                                 self.sources.len(),
-                                selected_path.display()
+                                selected_path.display(),
+                                selected_profile
                             );
                         }
                     } else {
@@ -1030,13 +1040,19 @@ fn run_imposition_work(
         rotate_copies: rotate,
     };
 
+    let profiles: Vec<String> = sources
+        .iter()
+        .map(|source: &SourcePage| source.color_label())
+        .collect();
+
     match impose_sources(&sources, &config) {
         Ok(bytes) => match fs::write(&destination, &bytes) {
             Ok(()) => {
                 format!(
-                    "PDF généré : {} ({} octets)",
+                    "PDF généré : {} ({} octets) — profils : {}",
                     destination.display(),
-                    bytes.len()
+                    bytes.len(),
+                    profiles.join(" ; ")
                 )
             }
             Err(e) => format!("Erreur écriture : {e}"),

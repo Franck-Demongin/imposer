@@ -8,8 +8,9 @@ use lopdf::{
 use crate::config::ImpositionConfig;
 use crate::error::{ImposerError, Result};
 use crate::geometry::mm_to_pt;
+use crate::icc::IccProfile;
 use crate::layout::{LayoutPlan, compute_layout};
-use crate::source::{ImageColorSpace, SourceKind, SourcePage};
+use crate::source::{ImageColorSpace, SourceColorKind, SourceKind, SourcePage};
 
 pub fn impose_sources(sources: &[SourcePage], config: &ImpositionConfig) -> Result<Vec<u8>> {
     if sources.is_empty() {
@@ -30,6 +31,20 @@ pub fn impose_sources(sources: &[SourcePage], config: &ImpositionConfig) -> Resu
             ));
         }
     }
+    let source_color_kind = sources
+        .iter()
+        .map(SourcePage::color_kind)
+        .collect::<Vec<_>>();
+    let source_color_labels = sources
+        .iter()
+        .map(SourcePage::color_label)
+        .collect::<Vec<_>>();
+    if source_color_kind.windows(2).any(|pair| pair[0] != pair[1]) {
+        return Err(ImposerError::MixedSourceColors(
+            source_color_labels.join(" ; "),
+        ));
+    }
+
     let plan = compute_layout(source_w, source_h, config)?;
 
     let mut output = Document::with_version("1.7");
@@ -53,13 +68,17 @@ pub fn impose_sources(sources: &[SourcePage], config: &ImpositionConfig) -> Resu
         .insert(catalog_id, Object::Dictionary(catalog));
     output.trailer.set("Root", Object::Reference(catalog_id));
 
-    // Output intents copied from first PDF source if available.
-    for s in sources {
-        if let SourceKind::PdfPage { bytes, .. } = &s.kind
+    // Output intents are copied only from a PDF source that actually declares
+    // them, so raster-only jobs do not falsely advertise PDF/X metadata.
+    let mut has_output_intent = false;
+    for src in sources {
+        if let SourceKind::PdfPage { bytes, .. } = &src.kind
             && let Ok(doc) = Document::load_mem(bytes)
         {
-            let _ = copy_output_intents(&doc, &mut output, catalog_id);
-            break;
+            has_output_intent |= copy_output_intents(&doc, &mut output, catalog_id)?;
+            if has_output_intent {
+                break;
+            }
         }
     }
 
@@ -92,12 +111,14 @@ pub fn impose_sources(sources: &[SourcePage], config: &ImpositionConfig) -> Resu
                 width_px,
                 height_px,
                 color_space,
+                icc_profile,
             } => create_image_form_xobject(
                 &mut output,
                 pixels,
                 *width_px,
                 *height_px,
                 *color_space,
+                icc_profile.as_deref(),
                 src.width_pt,
                 src.height_pt,
             )?,
@@ -125,6 +146,14 @@ pub fn impose_sources(sources: &[SourcePage], config: &ImpositionConfig) -> Resu
                 plan.sheet_height.into(),
             ]),
         );
+        let box_array = Object::Array(vec![
+            0.into(),
+            0.into(),
+            plan.sheet_width.into(),
+            plan.sheet_height.into(),
+        ]);
+        page_dict.set("BleedBox", box_array.clone());
+        page_dict.set("TrimBox", box_array.clone());
         page_dict.set("Contents", Object::Reference(content_id));
         page_dict.set("Resources", Object::Dictionary(resources));
 
@@ -148,6 +177,164 @@ pub fn impose_sources(sources: &[SourcePage], config: &ImpositionConfig) -> Resu
     output
         .objects
         .insert(pages_id, Object::Dictionary(final_pages));
+
+    let all_source_cmyk = source_color_kind
+        .iter()
+        .all(|k| *k == SourceColorKind::Cmyk);
+    let common_profile = if all_source_cmyk {
+        let mut common: Option<Vec<u8>> = None;
+        let mut profiles_match = true;
+        for src in sources {
+            match src.cmyk_profile_bytes() {
+                None => {
+                    profiles_match = false;
+                    break;
+                }
+                Some(bytes) => {
+                    if let Some(current) = common.as_ref()
+                        && current != &bytes
+                    {
+                        profiles_match = false;
+                        break;
+                    }
+                    common = Some(bytes);
+                }
+            }
+        }
+        if profiles_match { common } else { None }
+    } else {
+        None
+    };
+    let x4_possible = all_source_cmyk && (has_output_intent || common_profile.is_some());
+
+    let catalog_has_output_intents = output
+        .objects
+        .get(&catalog_id)
+        .and_then(|o| o.as_dict().ok())
+        .and_then(|d| d.get(b"OutputIntents").ok())
+        .is_some();
+
+    if x4_possible {
+        if !catalog_has_output_intents {
+            if let Some(profile_bytes) = common_profile.as_ref() {
+                let mut icc_dict = Dictionary::new();
+                icc_dict.set("Type", Object::Name(b"ICCProfile".to_vec()));
+                icc_dict.set("N", Object::Integer(4));
+                icc_dict.set("Length", Object::Integer(profile_bytes.len() as i64));
+                let icc_id = output.add_object(Stream {
+                    dict: icc_dict,
+                    content: profile_bytes.clone(),
+                    allows_compression: false,
+                    start_position: None,
+                });
+                let condition = IccProfile::parse(profile_bytes)
+                    .ok()
+                    .and_then(|p| p.info.description)
+                    .unwrap_or_else(|| "Custom CMYK".to_string());
+                let mut intent = Dictionary::new();
+                intent.set("Type", Object::Name(b"OutputIntent".to_vec()));
+                intent.set("S", Object::Name(b"GTS_PDFX".to_vec()));
+                intent.set(
+                    "OutputConditionIdentifier",
+                    Object::String(condition.as_bytes().to_vec(), lopdf::StringFormat::Literal),
+                );
+                intent.set(
+                    "RegistryName",
+                    Object::String(
+                        b"http://www.color.org".to_vec(),
+                        lopdf::StringFormat::Literal,
+                    ),
+                );
+                intent.set(
+                    "Info",
+                    Object::String(condition.as_bytes().to_vec(), lopdf::StringFormat::Literal),
+                );
+                intent.set("DestOutputProfile", Object::Reference(icc_id));
+                let intent_id = output.add_object(Object::Dictionary(intent));
+                if let Some(cat) = output
+                    .objects
+                    .get_mut(&catalog_id)
+                    .and_then(|o| o.as_dict_mut().ok())
+                {
+                    cat.set(
+                        "OutputIntents",
+                        Object::Array(vec![Object::Reference(intent_id)]),
+                    );
+                }
+            } else {
+                // Keep metadata-related variables read by preserving x4_possible state.
+            }
+        }
+
+        // XMP metadata stream.
+        let xmp = format!(
+            r#"<?xpacket begin="{}" id="W5M0MpCehiHzreSzNTczkc9d"?>
+<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+<rdf:Description rdf="" xmlns:pdfxid="http://www.npes.org/pdfx/ns/id/">
+<pdfxid:GTS_PDFXVersion>PDF/X-4</pdfxid:GTS_PDFXVersion>
+</rdf:Description></rdf:RDF></x:xmpmeta>
+<?xpacket end="w"?>"#,
+            "\u{FEFF}"
+        );
+        let xmp_bytes = xmp.into_bytes();
+        let mut md_dict = Dictionary::new();
+        md_dict.set("Type", Object::Name(b"Metadata".to_vec()));
+        md_dict.set("Subtype", Object::Name(b"XML".to_vec()));
+        md_dict.set("Length", Object::Integer(xmp_bytes.len() as i64));
+        let md_id = output.add_object(Stream {
+            dict: md_dict,
+            content: xmp_bytes,
+            allows_compression: false,
+            start_position: None,
+        });
+        if let Some(cat) = output
+            .objects
+            .get_mut(&catalog_id)
+            .and_then(|o| o.as_dict_mut().ok())
+        {
+            cat.set("Metadata", Object::Reference(md_id));
+        }
+
+        // Info dictionary.
+        let mut info = Dictionary::new();
+        info.set(
+            "Title",
+            Object::String(b"Imposed".to_vec(), lopdf::StringFormat::Literal),
+        );
+        info.set(
+            "Producer",
+            Object::String(b"imposer".to_vec(), lopdf::StringFormat::Literal),
+        );
+        info.set(
+            "CreationDate",
+            Object::String(b"D:20260101000000Z".to_vec(), lopdf::StringFormat::Literal),
+        );
+        info.set(
+            "ModDate",
+            Object::String(b"D:20260101000000Z".to_vec(), lopdf::StringFormat::Literal),
+        );
+        info.set(
+            "GTS_PDFXVersion",
+            Object::String(b"PDF/X-4".to_vec(), lopdf::StringFormat::Literal),
+        );
+        info.set("Trapped", Object::Name(b"False".to_vec()));
+        let info_id = output.add_object(Object::Dictionary(info));
+        output.trailer.set("Info", Object::Reference(info_id));
+
+        // ID.
+        let seed = sources.iter().fold([0u8; 16], |mut acc, s| {
+            acc[0] ^= s.width_pt.to_bits() as u8;
+            acc[1] ^= s.height_pt.to_bits() as u8;
+            acc
+        });
+        output.trailer.set(
+            "ID",
+            Object::Array(vec![
+                Object::String(seed.to_vec(), lopdf::StringFormat::Literal),
+                Object::String(seed.to_vec(), lopdf::StringFormat::Literal),
+            ]),
+        );
+    }
 
     let mut bytes = Vec::new();
     output
@@ -406,20 +593,17 @@ pub fn draw_crop_marks(ops: &mut Vec<Operation>, plan: &LayoutPlan) -> Result<()
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn create_image_form_xobject(
     output_doc: &mut Document,
     pixels: &[u8],
     width_px: u32,
     height_px: u32,
     color_space: ImageColorSpace,
+    icc_profile: Option<&[u8]>,
     width_pt: f32,
     height_pt: f32,
 ) -> Result<ObjectId> {
-    let cs: &'static str = match color_space {
-        ImageColorSpace::DeviceGray => "DeviceGray",
-        ImageColorSpace::DeviceRgb => "DeviceRGB",
-        ImageColorSpace::DeviceCmyk => "DeviceCMYK",
-    };
     if matches!(color_space, ImageColorSpace::DeviceCmyk)
         && pixels.len() != (width_px as usize * height_px as usize * 4)
     {
@@ -429,13 +613,43 @@ fn create_image_form_xobject(
             pixels.len()
         )));
     }
+
+    let color_space_obj = if let Some(profile) = icc_profile {
+        match color_space {
+            ImageColorSpace::DeviceCmyk => {
+                let mut icc_dict = Dictionary::new();
+                icc_dict.set("N", Object::Integer(4));
+                icc_dict.set("Length", Object::Integer(profile.len() as i64));
+                let icc_stream = Stream {
+                    dict: icc_dict,
+                    content: profile.to_vec(),
+                    allows_compression: false,
+                    start_position: None,
+                };
+                let icc_id = output_doc.add_object(icc_stream);
+                Object::Array(vec![
+                    Object::Name(b"ICCBased".to_vec()),
+                    Object::Reference(icc_id),
+                ])
+            }
+            _ => Object::Name(b"DeviceRGB".to_vec()),
+        }
+    } else {
+        let cs = match color_space {
+            ImageColorSpace::DeviceGray => "DeviceGray",
+            ImageColorSpace::DeviceRgb => "DeviceRGB",
+            ImageColorSpace::DeviceCmyk => "DeviceCMYK",
+        };
+        Object::Name(cs.as_bytes().to_vec())
+    };
+
     // Image XObject
     let mut img_dict = Dictionary::new();
     img_dict.set("Type", Object::Name(b"XObject".to_vec()));
     img_dict.set("Subtype", Object::Name(b"Image".to_vec()));
     img_dict.set("Width", Object::Integer(width_px as i64));
     img_dict.set("Height", Object::Integer(height_px as i64));
-    img_dict.set("ColorSpace", Object::Name(cs.as_bytes().to_vec()));
+    img_dict.set("ColorSpace", color_space_obj);
     img_dict.set("BitsPerComponent", Object::Integer(8));
     let mut img_stream = Stream::new(img_dict, pixels.to_vec());
     img_stream.allows_compression = true;
@@ -461,19 +675,23 @@ fn create_image_form_xobject(
     Ok(output_doc.add_object(form_stream))
 }
 
-fn copy_output_intents(source: &Document, dest: &mut Document, catalog_id: ObjectId) -> Result<()> {
+fn copy_output_intents(
+    source: &Document,
+    dest: &mut Document,
+    catalog_id: ObjectId,
+) -> Result<bool> {
     let src_catalog_id = match source.trailer.get(b"Root") {
         Ok(Object::Reference(id)) => *id,
-        _ => return Ok(()),
+        _ => return Ok(false),
     };
     let src_catalog = match source.get_object(src_catalog_id) {
         Ok(Object::Dictionary(d)) => d,
-        _ => return Ok(()),
+        _ => return Ok(false),
     };
 
     let intents = match src_catalog.get(b"OutputIntents") {
         Ok(o) => o.clone(),
-        Err(_) => return Ok(()),
+        Err(_) => return Ok(false),
     };
 
     let mut cache: HashMap<ObjectId, ObjectId> = HashMap::new();
@@ -482,7 +700,7 @@ fn copy_output_intents(source: &Document, dest: &mut Document, catalog_id: Objec
     if let Some(Object::Dictionary(dict)) = dest.objects.get_mut(&catalog_id) {
         dict.set(b"OutputIntents".to_vec(), copied);
     }
-    Ok(())
+    Ok(true)
 }
 
 fn create_form_xobject(

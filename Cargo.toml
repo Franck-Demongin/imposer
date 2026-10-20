@@ -23,6 +23,13 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg"]
 psd = "0.3.5"
 zune-psd = "0.5.1"
 moxcms = "0.8.1"
+sha2 = "0.10"
+flate2 = "1.1"
+hex = "0.4"
+chrono = "0.4"
+quick-xml = "0.38"
+uuid = "1.26"
+serde = { version = "1.0", features = ["derive"] }
 
 [dev-dependencies]
 tempfile = "3"

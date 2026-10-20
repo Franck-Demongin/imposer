@@ -1,17 +1,32 @@
+#![forbid(unsafe_code)]
+
 pub mod config;
 pub mod error;
 pub mod geometry;
+pub mod icc;
+pub mod import;
 pub mod layout;
+pub mod numfmt;
+pub mod output;
 pub mod pdf;
+pub mod preflight;
+pub mod profile;
 pub mod source;
 
 pub use config::ImpositionConfig;
 pub use error::{ImposerError, Result};
-pub use layout::{LayoutPlan, Placement, compute_layout};
+pub use geometry::{Size, mm_to_pt, pt_to_mm};
+pub use icc::{IccProfile, ProfileMatch};
+pub use import::ImportedPage;
+pub use layout::{Backing, LayoutPlan, Placement, Rot90, SheetSpec, compute_layout};
+pub use output::{OutputBuilder, OutputOptions};
 pub use pdf::impose;
 pub use pdf::impose_sources;
 pub use pdf::{
     count_crop_marks, crop_mark_count, crop_mark_edges, crop_marks, crop_marks_count,
     draw_crop_marks,
 };
-pub use source::{SourceKind, SourcePage, sources_from_bytes};
+pub use preflight::{PreflightReport, preflight, preflight_output};
+pub use profile::{ProfileDetection, detect_cmyk_profile};
+pub use source::SourceColorKind;
+pub use source::{SourceKind, SourcePage, SourcePdf, open_pdf_source, sources_from_bytes};

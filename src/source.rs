@@ -1,7 +1,22 @@
 use crate::error::{ImposerError, Result};
+use crate::icc::IccProfile;
 use lopdf::Document;
-use moxcms::{ColorProfile, Layout, TransformOptions};
 use psd::Psd;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SourceColorKind {
+    Rgb,
+    Cmyk,
+}
+
+impl SourceColorKind {
+    pub fn label(&self) -> &'static str {
+        match self {
+            SourceColorKind::Rgb => "RVB",
+            SourceColorKind::Cmyk => "CMJN",
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImageColorSpace {
@@ -21,7 +36,56 @@ pub enum SourceKind {
         width_px: u32,
         height_px: u32,
         color_space: ImageColorSpace,
+        icc_profile: Option<Vec<u8>>,
     },
+}
+
+impl SourcePage {
+    pub fn color_kind(&self) -> SourceColorKind {
+        match &self.kind {
+            SourceKind::PdfPage { bytes, page_index } => pdf_color_kind(bytes, *page_index),
+            SourceKind::Raster { color_space, .. } => match color_space {
+                ImageColorSpace::DeviceRgb | ImageColorSpace::DeviceGray => SourceColorKind::Rgb,
+                ImageColorSpace::DeviceCmyk => SourceColorKind::Cmyk,
+            },
+        }
+    }
+
+    pub fn color_label(&self) -> String {
+        match &self.kind {
+            SourceKind::Raster {
+                color_space,
+                icc_profile,
+                ..
+            } => match color_space {
+                ImageColorSpace::DeviceRgb => "RVB (pas de conversion)".to_string(),
+                ImageColorSpace::DeviceGray => "RVB (niveaux de gris)".to_string(),
+                ImageColorSpace::DeviceCmyk => icc_profile
+                    .as_ref()
+                    .and_then(|b| IccProfile::parse(b).ok())
+                    .map(|p| {
+                        if let Some(desc) = p.info.description.as_ref().filter(|s| !s.is_empty()) {
+                            format!("CMJN ({desc})")
+                        } else {
+                            "CMJN (profil ICC embarqué)".to_string()
+                        }
+                    })
+                    .unwrap_or_else(|| "CMJN (sans profil)".to_string()),
+            },
+            SourceKind::PdfPage { bytes, page_index } => pdf_color_label(bytes, *page_index),
+        }
+    }
+
+    pub fn cmyk_profile_bytes(&self) -> Option<Vec<u8>> {
+        match &self.kind {
+            SourceKind::Raster { icc_profile, .. } => icc_profile.clone(),
+            SourceKind::PdfPage { bytes, page_index } => {
+                let src = open_pdf_source(bytes.clone()).ok()?;
+                let det = crate::profile::detect_cmyk_profile(&src, *page_index, None).ok()?;
+                det.profile.map(|p| p.bytes)
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -108,6 +172,7 @@ fn parse_png(bytes: &[u8]) -> Result<SourcePage> {
             width_px: w_px,
             height_px: h_px,
             color_space: ImageColorSpace::DeviceRgb,
+            icc_profile: None,
         },
     })
 }
@@ -154,6 +219,7 @@ fn parse_jpeg(bytes: &[u8]) -> Result<SourcePage> {
             width_px: w_px,
             height_px: h_px,
             color_space: ImageColorSpace::DeviceRgb,
+            icc_profile: None,
         },
     })
 }
@@ -205,10 +271,13 @@ fn jpeg_dpi(bytes: &[u8]) -> Option<(f32, f32)> {
 
 // ---------- PSD ----------
 fn parse_psd(bytes: &[u8]) -> Result<SourcePage> {
-    if let Ok(s) = parse_psd_zune(bytes) {
-        return Ok(s);
+    match parse_psd_zune(bytes) {
+        Ok(s) => Ok(s),
+        Err(e @ ImposerError::NoProfile)
+        | Err(e @ ImposerError::InvalidIcc(_))
+        | Err(e @ ImposerError::AmbiguousProfile) => Err(e),
+        Err(_) => parse_psd_legacy(bytes),
     }
-    parse_psd_legacy(bytes)
 }
 
 fn parse_psd_zune(bytes: &[u8]) -> Result<SourcePage> {
@@ -269,40 +338,20 @@ fn parse_psd_zune(bytes: &[u8]) -> Result<SourcePage> {
                 ));
             }
 
-            // zune-psd exposes a 4-byte CMYK raster directly. The embedded CMYK
-            // samples use the inverse polarity for this profile, and are converted
-            // to sRGB after complementing them.
             let inverted: Vec<u8> = raw.iter().map(|v| 255u8.wrapping_sub(*v)).collect();
-            let rgb = match extract_psd_embedded_profile(bytes) {
-                Some(iccs) => cmyk_icc_to_rgb(&iccs, &inverted)
-                    .map_err(|e| ImposerError::Parse(format!("PSD ICC : {e}")))?,
-                None => {
-                    // Without an ICC profile, preserve the inverted sample order directly
-                    // as CMYK and let the PDF layer describe the colour space.
-                    let width_pt = w as f32 / 300.0 * 72.0;
-                    let height_pt = h as f32 / 300.0 * 72.0;
-                    return Ok(SourcePage {
-                        width_pt,
-                        height_pt,
-                        kind: SourceKind::Raster {
-                            pixels: inverted,
-                            width_px: w as u32,
-                            height_px: h as u32,
-                            color_space: ImageColorSpace::DeviceCmyk,
-                        },
-                    });
-                }
-            };
+            let icc_bytes = extract_psd_embedded_profile(bytes).ok_or(ImposerError::NoProfile)?;
+            IccProfile::parse(&icc_bytes).map_err(|e| ImposerError::InvalidIcc(e.to_string()))?;
             let width_pt = w as f32 / 300.0 * 72.0;
             let height_pt = h as f32 / 300.0 * 72.0;
             return Ok(SourcePage {
                 width_pt,
                 height_pt,
                 kind: SourceKind::Raster {
-                    pixels: rgb,
+                    pixels: inverted,
                     width_px: w as u32,
                     height_px: h as u32,
-                    color_space: ImageColorSpace::DeviceRgb,
+                    color_space: ImageColorSpace::DeviceCmyk,
+                    icc_profile: Some(icc_bytes),
                 },
             });
         }
@@ -453,6 +502,7 @@ fn make_raster_source(
             width_px: w_px,
             height_px: h_px,
             color_space,
+            icc_profile: None,
         },
     }
 }
@@ -503,22 +553,123 @@ fn extract_psd_embedded_profile(bytes: &[u8]) -> Option<Vec<u8>> {
     None
 }
 
-fn cmyk_icc_to_rgb(profile_bytes: &[u8], cmyk: &[u8]) -> Result<Vec<u8>> {
-    let source_profile = ColorProfile::new_from_slice(profile_bytes)
-        .map_err(|e| ImposerError::Parse(e.to_string()))?;
-    let destination_profile = ColorProfile::new_srgb();
-    let transform = source_profile
-        .create_transform_8bit(
-            Layout::Rgba,
-            &destination_profile,
-            Layout::Rgb,
-            TransformOptions::default(),
-        )
-        .map_err(|e| ImposerError::Parse(e.to_string()))?;
-    let chunks = cmyk.len() / 4;
-    let mut rgb = vec![0u8; chunks * 3];
-    transform
-        .transform(cmyk, &mut rgb)
-        .map_err(|e| ImposerError::Parse(e.to_string()))?;
-    Ok(rgb)
+fn pdf_color_kind(bytes: &[u8], page_index: usize) -> SourceColorKind {
+    if let Ok(src) = open_pdf_source(bytes.to_vec())
+        && let Ok(det) = crate::profile::detect_cmyk_profile(&src, page_index, None)
+        && det.profile.is_some()
+    {
+        return SourceColorKind::Cmyk;
+    }
+    if bytes.windows(10).any(|w| w == b"DeviceCMYK") {
+        return SourceColorKind::Cmyk;
+    }
+    SourceColorKind::Rgb
+}
+
+fn pdf_color_label(bytes: &[u8], page_index: usize) -> String {
+    if let Ok(src) = open_pdf_source(bytes.to_vec())
+        && let Ok(det) = crate::profile::detect_cmyk_profile(&src, page_index, None)
+        && let Some(p) = det.profile
+    {
+        if let Some(desc) = p.info.description.as_ref().filter(|s| !s.is_empty()) {
+            return format!("CMJN ({desc})");
+        }
+        return "CMJN (profil ICC détecté)".to_string();
+    }
+    if bytes.windows(10).any(|w| w == b"DeviceCMYK") {
+        "CMJN (sans profil identifiable)".to_string()
+    } else {
+        "RVB (pas de conversion)".to_string()
+    }
+}
+
+/// Source PDF ouvert (lecture + détection), pour profile/import.
+#[derive(Debug)]
+pub struct SourcePdf {
+    pub bytes: Vec<u8>,
+    pub document: lopdf::Document,
+}
+
+pub fn open_pdf_source(bytes: Vec<u8>) -> crate::error::Result<SourcePdf> {
+    let doc = lopdf::Document::load_mem(&bytes)
+        .map_err(|e| crate::error::ImposerError::Parse(e.to_string()))?;
+    if doc.is_encrypted() {
+        return Err(crate::error::ImposerError::EncryptedPdf);
+    }
+    if doc.get_pages().is_empty() {
+        return Err(crate::error::ImposerError::InvalidPageCount(0));
+    }
+    Ok(SourcePdf {
+        bytes,
+        document: doc,
+    })
+}
+
+pub fn page_object_ids(doc: &lopdf::Document) -> Vec<lopdf::ObjectId> {
+    let mut v: Vec<(u32, lopdf::ObjectId)> = doc.get_pages().into_iter().collect();
+    v.sort_by_key(|(n, _)| *n);
+    v.into_iter().map(|(_, id)| id).collect()
+}
+
+pub fn inherited_page_dict(
+    doc: &lopdf::Document,
+    page_id: lopdf::ObjectId,
+) -> crate::error::Result<lopdf::Dictionary> {
+    use lopdf::{Dictionary, Object};
+    let page_obj = doc
+        .get_object(page_id)
+        .map_err(|e| crate::error::ImposerError::Parse(e.to_string()))?;
+    let mut page = page_obj
+        .as_dict()
+        .map_err(|e| crate::error::ImposerError::Parse(e.to_string()))?
+        .clone();
+
+    let mut parents: Vec<lopdf::ObjectId> = Vec::new();
+    let mut cur = page_id;
+    while let Ok(obj) = doc.get_object(cur) {
+        let dict = match obj.as_dict() {
+            Ok(d) => d,
+            Err(_) => break,
+        };
+        match dict.get(b"Parent") {
+            Ok(Object::Reference(pid)) => {
+                cur = *pid;
+                parents.push(cur);
+            }
+            _ => break,
+        }
+    }
+
+    const INHERITED: &[&[u8]] = &[
+        b"Resources",
+        b"MediaBox",
+        b"CropBox",
+        b"BleedBox",
+        b"TrimBox",
+        b"ArtBox",
+        b"Rotate",
+        b"UserUnit",
+    ];
+    for key in INHERITED {
+        if page.get(key).is_err() {
+            for anc in &parents {
+                if let Ok(Object::Dictionary(anc_dict)) = doc.get_object(*anc)
+                    && let Ok(v) = anc_dict.get(key)
+                {
+                    page.set(key.to_vec(), v.clone());
+                    break;
+                }
+            }
+        }
+    }
+    if page.get(b"Resources").is_err() {
+        page.set(b"Resources", Object::Dictionary(Dictionary::new()));
+    }
+    Ok(page)
+}
+
+pub fn decompress_stream(stream: &lopdf::Stream) -> crate::error::Result<Vec<u8>> {
+    stream
+        .decompressed_content()
+        .map_err(|e| crate::error::ImposerError::UnsupportedFilter(e.to_string()))
 }

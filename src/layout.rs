@@ -179,3 +179,80 @@ mod tests {
         assert_eq!(plan.placements.len(), plan.cols * plan.rows);
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Rot90 {
+    Deg0,
+    Deg90,
+    Deg180,
+    Deg270,
+}
+
+impl Rot90 {
+    pub fn degrees(self) -> i32 {
+        match self {
+            Rot90::Deg0 => 0,
+            Rot90::Deg90 => 90,
+            Rot90::Deg180 => 180,
+            Rot90::Deg270 => 270,
+        }
+    }
+    pub fn swaps_dimensions(self) -> bool {
+        matches!(self, Rot90::Deg90 | Rot90::Deg270)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Backing {
+    WorkAndTurn,
+    WorkAndTumble,
+    Sheetwise,
+}
+
+impl Backing {
+    /// Transforme une position de pose du recto en position correspondante au verso.
+    pub fn mirror_placement(self, p: Placement, sheet_w: f32, sheet_h: f32) -> Placement {
+        match self {
+            Backing::WorkAndTurn => Placement {
+                trim_x: sheet_w - p.trim_x - p.trim_w,
+                trim_y: p.trim_y,
+                trim_w: p.trim_w,
+                trim_h: p.trim_h,
+            },
+            Backing::WorkAndTumble => Placement {
+                trim_x: p.trim_x,
+                trim_y: sheet_h - p.trim_y - p.trim_h,
+                trim_w: p.trim_w,
+                trim_h: p.trim_h,
+            },
+            Backing::Sheetwise => p,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SheetSpec {
+    pub width_pt: f64,
+    pub height_pt: f64,
+    pub bleed_pt: f64,
+    pub safety_margin_pt: f64,
+    pub trim_x_pt: f64,
+    pub trim_y_pt: f64,
+    pub trim_w_pt: f64,
+    pub trim_h_pt: f64,
+}
+
+impl SheetSpec {
+    pub fn from_points(w: f64, h: f64, bleed: f64) -> Self {
+        Self {
+            width_pt: w,
+            height_pt: h,
+            bleed_pt: bleed,
+            safety_margin_pt: crate::geometry::mm_to_pt_f64(5.0),
+            trim_x_pt: bleed,
+            trim_y_pt: bleed,
+            trim_w_pt: w - 2.0 * bleed,
+            trim_h_pt: h - 2.0 * bleed,
+        }
+    }
+}
