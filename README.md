@@ -114,11 +114,13 @@ Recto/verso à partir de deux fichiers :
 ```
 
 Options principales : `--sheet` (`a4`, `a3`, `sra3`), `--sheet-orientation`
-(`auto`, `portrait`, `landscape`), `--bleed` (mm), `--safety-margin` (mm),
-`--document-orientation` (`portrait`, `landscape`), `--no-rotate-copies`, `--tui`.
+(`auto`, `portrait`, `landscape`), `--rotate-verso` (force a 180° rotation of
+verso sheets, default false), `--bleed` (mm), `--safety-margin` (mm),
+`--no-rotate-copies`, `--tui`.
 
-En mode `portrait` du document, le verso et ses marques de coupe sont tournés de
-180°. En mode `landscape`, le système de coordonnées de la planche est conservé.
+Les applications CMYK conservent les profils ICC et les intentions de sortie ;
+les applications RVB sont écrites en DeviceRGB. La rotation des versos n'est
+appliquée que si `--rotate-verso` est demandé.
 
 ## Tests
 

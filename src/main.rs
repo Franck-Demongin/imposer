@@ -30,8 +30,8 @@ struct Cli {
     #[arg(long, default_value_t = 5.0)]
     safety_margin: f32,
 
-    #[arg(long, value_enum, default_value = "portrait")]
-    document_orientation: imposer::config::DocumentOrientation,
+    #[arg(long)]
+    rotate_verso: bool,
 
     #[arg(long)]
     no_rotate_copies: bool,
@@ -79,7 +79,7 @@ fn main() {
         sheet_orientation: cli.sheet_orientation,
         bleed_mm: cli.bleed,
         safety_margin_mm: cli.safety_margin,
-        document_orientation: cli.document_orientation,
+        rotate_verso: cli.rotate_verso,
         rotate_copies: !cli.no_rotate_copies,
     };
 

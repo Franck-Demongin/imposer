@@ -20,7 +20,7 @@ Main modules:
 - `src/main.rs`: CLI entry point, argument mapping, color/profile reporting, TUI launch
 - `src/lib.rs`: public exports (config, errors, geometry, ICC, import, layout, output, PDF, preflight, profile, source APIs)
 - `src/tui.rs`: interactive ratatui/crossterm interface, source profile reporting
-- `src/config.rs`: sheet/document orientations, bleed, safety margin, copy rotation
+- `src/config.rs`: sheet orientation, bleed, safety margin, copy/verso rotation
 - `src/geometry.rs`: mm/pt conversions
 - `src/icc.rs`: ICC header parsing, profile descriptions, SHA-256 comparison
 - `src/import.rs`: imported page metadata and page box propagation helpers
@@ -65,7 +65,7 @@ CLI options:
 - `--sheet-orientation`: `auto`, `portrait`, `landscape` (default `auto`)
 - `--bleed`: bleed in mm (default `2.0`)
 - `--safety-margin`: safety margin in mm (default `5.0`)
-- `--document-orientation`: `portrait`, `landscape` (default `portrait`)
+- `--rotate-verso`: force a 180° rotation of verso sheets (default `false`)
 - `--no-rotate-copies`: disable 90° copy rotation when it improves fit
 - `--tui`: open the interactive TUI (also opens automatically when no input/output is given)
 
@@ -91,9 +91,9 @@ Integration tests are in `tests/integration_test.rs`. Test fixtures are in
 - Layout candidates are selected by maximum copy count, then minimum waste.
 - The placement grid is centered independently on horizontal and vertical axes; horizontal/vertical gaps can differ.
 - Recto and verso faces use the same placements. Verso is transformed with a
-  180° rotation only when `--document-orientation portrait` is selected;
-  otherwise it keeps the same sheet coordinate system. When the 180°
-  rotation is applied, crop marks follow the same transform.
+  180° rotation only when `--rotate-verso` is used; otherwise it keeps the same
+  sheet coordinate system. When the 180° rotation is applied, crop marks follow
+  the same transform.
 - Deep copying is used for page resources, hierarchical forms, ICC streams, and OutputIntents.
 - PDF and PSD sources are inspected recursively for GTS_PDFX OutputIntents and ICCBased CMYK profiles; multiple distinct ICC profiles are rejected.
 - PSD CMYK sources require a valid embedded ICC profile, are not silently converted to RGB, use embedded PSD resolution when present (otherwise 300 DPI), and still reject CMYK without a profile. Mixtures of RGB and CMYK sources are rejected.

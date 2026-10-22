@@ -1,4 +1,4 @@
-use imposer::config::{DocumentOrientation, SheetOrientation, SheetSize};
+use imposer::config::{SheetOrientation, SheetSize};
 use imposer::source::SourceColorKind;
 use imposer::{ImpositionConfig, impose, impose_sources, sources_from_bytes};
 use lopdf::Document;
@@ -16,7 +16,8 @@ fn one_page_output() {
         sheet_orientation: SheetOrientation::Auto,
         bleed_mm: 2.0,
         safety_margin_mm: 5.0,
-        document_orientation: DocumentOrientation::Portrait,
+        rotate_verso: true,
+
         rotate_copies: true,
     };
     let bytes = impose(&input, &cfg).unwrap();
@@ -40,7 +41,8 @@ fn two_page_output() {
         sheet_orientation: SheetOrientation::Auto,
         bleed_mm: 2.0,
         safety_margin_mm: 5.0,
-        document_orientation: DocumentOrientation::Portrait,
+        rotate_verso: true,
+
         rotate_copies: true,
     };
     let bytes = impose(&input, &cfg).unwrap();
@@ -56,7 +58,8 @@ fn output_intent_propagated() {
         sheet_orientation: SheetOrientation::Auto,
         bleed_mm: 2.0,
         safety_margin_mm: 5.0,
-        document_orientation: DocumentOrientation::Portrait,
+        rotate_verso: true,
+
         rotate_copies: true,
     };
     let src = Document::load_mem(&input).unwrap();
@@ -88,7 +91,8 @@ fn png_one_page_output() {
         sheet_orientation: SheetOrientation::Auto,
         bleed_mm: 2.0,
         safety_margin_mm: 5.0,
-        document_orientation: DocumentOrientation::Portrait,
+        rotate_verso: true,
+
         rotate_copies: true,
     };
     let bytes = impose_sources(&sources, &cfg).unwrap();
@@ -117,7 +121,8 @@ fn jpeg_two_page_output() {
         sheet_orientation: SheetOrientation::Auto,
         bleed_mm: 2.0,
         safety_margin_mm: 5.0,
-        document_orientation: DocumentOrientation::Portrait,
+        rotate_verso: true,
+
         rotate_copies: true,
     };
     let bytes = impose_sources(&sources, &cfg).unwrap();
@@ -213,7 +218,8 @@ fn psd_cmyk_single_page_output() {
         sheet_orientation: SheetOrientation::Auto,
         bleed_mm: 2.0,
         safety_margin_mm: 5.0,
-        document_orientation: DocumentOrientation::Portrait,
+        rotate_verso: true,
+
         rotate_copies: true,
     };
     let bytes = impose_sources(&sources, &cfg).unwrap();

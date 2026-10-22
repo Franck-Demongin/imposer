@@ -168,7 +168,7 @@ mod tests {
             sheet_orientation: SheetOrientation::Auto,
             bleed_mm: 2.0,
             safety_margin_mm: 5.0,
-            document_orientation: crate::config::DocumentOrientation::Portrait,
+            rotate_verso: true,
             rotate_copies: true,
         };
         let src_w = crate::geometry::mm_to_pt(90.0);

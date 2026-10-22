@@ -128,8 +128,7 @@ pub fn impose_sources(sources: &[SourcePage], config: &ImpositionConfig) -> Resu
         let mut resources = Dictionary::new();
         resources.set(b"XObject".to_vec(), Object::Dictionary(xobjects));
 
-        let verso_rotated =
-            is_verso && config.document_orientation == crate::config::DocumentOrientation::Portrait;
+        let verso_rotated = is_verso && config.rotate_verso;
         let content_data = build_face_content(&plan, is_verso, verso_rotated)?;
         let content_id = output.add_object(Stream::new(Dictionary::new(), content_data));
 

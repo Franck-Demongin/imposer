@@ -25,19 +25,13 @@ pub enum SheetOrientation {
     Landscape,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-pub enum DocumentOrientation {
-    Portrait,
-    Landscape,
-}
-
 #[derive(Debug, Clone, Copy)]
 pub struct ImpositionConfig {
     pub sheet_size: SheetSize,
     pub sheet_orientation: SheetOrientation,
     pub bleed_mm: f32,
     pub safety_margin_mm: f32,
-    pub document_orientation: DocumentOrientation,
+    pub rotate_verso: bool,
     pub rotate_copies: bool,
 }
 
@@ -48,7 +42,7 @@ impl Default for ImpositionConfig {
             sheet_orientation: SheetOrientation::Auto,
             bleed_mm: 2.0,
             safety_margin_mm: 5.0,
-            document_orientation: DocumentOrientation::Portrait,
+            rotate_verso: false,
             rotate_copies: true,
         }
     }

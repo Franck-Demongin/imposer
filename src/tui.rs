@@ -6,7 +6,8 @@ use crossterm::execute;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
-use imposer::config::{DocumentOrientation, ImpositionConfig, SheetOrientation, SheetSize};
+use imposer::config::{ImpositionConfig, SheetOrientation, SheetSize};
+
 use imposer::{ImposerError, Result, SourcePage, impose_sources, sources_from_bytes};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
@@ -43,7 +44,7 @@ const OPTION_COUNT: usize = 6;
 struct OptionsState {
     sheet: SheetSize,
     sheet_orientation: SheetOrientation,
-    document_orientation: DocumentOrientation,
+    rotate_verso: bool,
     bleed: f32,
     safety: f32,
     rotate: bool,
@@ -54,7 +55,7 @@ impl Default for OptionsState {
         Self {
             sheet: SheetSize::A4,
             sheet_orientation: SheetOrientation::Auto,
-            document_orientation: DocumentOrientation::Portrait,
+            rotate_verso: false,
             bleed: 2.0,
             safety: 5.0,
             rotate: true,
@@ -136,7 +137,7 @@ struct PendingRun {
     source_paths: Vec<PathBuf>,
     sheet: SheetSize,
     sheet_orientation: SheetOrientation,
-    document_orientation: DocumentOrientation,
+    rotate_verso: bool,
     bleed: f32,
     safety: f32,
     rotate: bool,
@@ -552,16 +553,7 @@ impl App {
                 self.options.sheet_orientation = values[next];
             }
             2 => {
-                let values = [
-                    DocumentOrientation::Portrait,
-                    DocumentOrientation::Landscape,
-                ];
-                let idx = values
-                    .iter()
-                    .position(|v| *v == self.options.document_orientation)
-                    .unwrap_or(0);
-                let next = (idx as i32 + delta).rem_euclid(values.len() as i32) as usize;
-                self.options.document_orientation = values[next];
+                self.options.rotate_verso = !self.options.rotate_verso;
             }
             3 => {
                 let next = self.options.bleed + delta as f32 * 0.5;
@@ -608,7 +600,7 @@ impl App {
         let source_paths = run.source_paths;
         let sheet = run.sheet;
         let sheet_orientation = run.sheet_orientation;
-        let document_orientation = run.document_orientation;
+        let rotate_verso = run.rotate_verso;
         let bleed = run.bleed;
         let safety = run.safety;
         let rotate = run.rotate;
@@ -624,7 +616,7 @@ impl App {
                 destination,
                 sheet,
                 sheet_orientation,
-                document_orientation,
+                rotate_verso,
                 bleed,
                 safety,
                 rotate,
@@ -655,7 +647,7 @@ impl App {
             source_paths: self.sources.clone(),
             sheet: self.options.sheet,
             sheet_orientation: self.options.sheet_orientation,
-            document_orientation: self.options.document_orientation,
+            rotate_verso: self.options.rotate_verso,
             bleed: self.options.bleed,
             safety: self.options.safety,
             rotate: self.options.rotate,
@@ -775,8 +767,12 @@ impl App {
                 sheet_orientation_name(self.options.sheet_orientation).to_string(),
             ),
             (
-                "Orientation document",
-                document_orientation_name(self.options.document_orientation).to_string(),
+                "Rotation des versos",
+                if self.options.rotate_verso {
+                    String::from("Oui")
+                } else {
+                    String::from("Non")
+                },
             ),
             ("Bord perdu (mm)", format!("{:.1}", self.options.bleed)),
             ("Marge sécurité (mm)", format!("{:.1}", self.options.safety)),
@@ -991,7 +987,7 @@ fn run_imposition_work(
     destination: PathBuf,
     sheet: SheetSize,
     sheet_orientation: SheetOrientation,
-    document_orientation: DocumentOrientation,
+    rotate_verso: bool,
     bleed: f32,
     safety: f32,
     rotate: bool,
@@ -1036,7 +1032,7 @@ fn run_imposition_work(
         sheet_orientation,
         bleed_mm: bleed,
         safety_margin_mm: safety,
-        document_orientation,
+        rotate_verso,
         rotate_copies: rotate,
     };
 
@@ -1074,13 +1070,6 @@ fn sheet_orientation_name(v: SheetOrientation) -> &'static str {
         SheetOrientation::Auto => "Auto",
         SheetOrientation::Portrait => "Portrait",
         SheetOrientation::Landscape => "Paysage",
-    }
-}
-
-fn document_orientation_name(v: DocumentOrientation) -> &'static str {
-    match v {
-        DocumentOrientation::Portrait => "Portrait",
-        DocumentOrientation::Landscape => "Paysage",
     }
 }
 
