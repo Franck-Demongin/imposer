@@ -1,6 +1,6 @@
 # Imposer
 
-Rust CLI/library for imposing PDF, PNG, JPEG/JPG, and PSD documents on A4, A3, and SRA3 sheets (v0.3.3; master also includes post-release PSD/ICC compatibility fixes).
+Rust CLI/library for imposing PDF, PNG, JPEG/JPG, and PSD documents on A4, A3, and SRA3 sheets (v0.3.4).
 
 ## Project Overview
 
