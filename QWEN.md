@@ -1,6 +1,6 @@
 # Imposer
 
-Rust CLI/library for imposing PDF, PNG, JPEG/JPG, and PSD documents on A4, A3, and SRA3 sheets (v0.3.3).
+Rust CLI/library for imposing PDF, PNG, JPEG/JPG, and PSD documents on A4, A3, and SRA3 sheets (v0.3.3; master also includes post-release PSD/ICC compatibility fixes).
 
 ## Project Overview
 
@@ -11,8 +11,9 @@ generation.
 Supported input handling:
 - PDF: 1 or 2 pages, with preserved resources, OutputIntent profiles, and ICC-based CMYK profiles
 - PNG and JPEG/JPG: converted to RGB; DPI is read when present, otherwise 300 DPI is used; ICC profiles are ignored (DeviceRGB)
-- PSD: RGB, grayscale, and CMYK; CMYK requires an embedded ICC profile (CMYK without a profile is rejected)
+- PSD: RGB, grayscale, and CMYK; CMYK requires an embedded ICC profile (CMYK without a profile is rejected); embedded PSD resolution is used when present, otherwise 300 DPI is assumed, and failed CMYK PSD decoding is not silently converted to RGB
 - All sources in one imposition must have the same color kind (RGB or CMYK)
+- All CMYK sources in one imposition must have compatible ICC profiles; PDF and PSD CMYK profile streams are compared by SHA-256, and distinct profiles are rejected
 - All sources passed to one imposition must have matching dimensions within `0.5 pt`
 
 Main modules:
@@ -24,13 +25,13 @@ Main modules:
 - `src/icc.rs`: ICC header parsing, profile descriptions, SHA-256 comparison
 - `src/import.rs`: imported page metadata and page box propagation helpers
 - `src/layout.rs`: sheet selection, grid computation, centered placement origins, trim boxes
-- `src/source.rs`: format detection, source parsing, dimensions, color kind, PSD CMYK/ICC handling
+- `src/source.rs`: format detection, source parsing, dimensions, color kind, PSD CMYK/ICC handling, profile access, PSD resolution extraction
 - `src/profile.rs`: recursive ICC-based and OutputIntent CMYK profile detection
 - `src/pdf.rs`: PDF parsing, Form XObjects, deep resource copying, ICC raster images, crop marks, OutputIntents, X4 metadata, recto/verso generation
-- `src/preflight.rs`: source and output PDFX checks, color policy, page boxes, annotations
+- `src/preflight.rs`: PDF and raster source checks, output PDF/X checks, color policy, page boxes, annotations
 - `src/output.rs`: alternate output builder based on imported pages (not used by current `pdf.rs` pipeline)
 - `src/numfmt.rs`: numeric formatting helpers for output metadata
-- `src/error.rs`: typed errors
+- `src/error.rs`: typed errors (including mixed RGB/CMYK and incompatible ICC profile conflicts)
 
 ## Building and Running
 
@@ -95,8 +96,9 @@ Integration tests are in `tests/integration_test.rs`. Test fixtures are in
   rotation is applied, crop marks follow the same transform.
 - Deep copying is used for page resources, hierarchical forms, ICC streams, and OutputIntents.
 - PDF and PSD sources are inspected recursively for GTS_PDFX OutputIntents and ICCBased CMYK profiles; multiple distinct ICC profiles are rejected.
-- PSD CMYK sources require an embedded ICC profile. Mixtures of RGB and CMYK sources are rejected.
-- PDF/X-4 metadata (OutputIntent, ICC-based streams, XMP, Info, `/ID`, and Media/Bleed/Trim boxes) is emitted when every source is CMYK and either the sources share an OutputIntent or the same ICC profile.
+- PSD CMYK sources require a valid embedded ICC profile, are not silently converted to RGB, use embedded PSD resolution when present (otherwise 300 DPI), and still reject CMYK without a profile. Mixtures of RGB and CMYK sources are rejected.
+- CMYK profiles from mixed PDF and PSD source sets are compared by SHA-256 and treated as compatible only when those hashes match.
+- PDF/X-4 metadata (OutputIntent, ICC-based streams, XMP, Info, `/ID`, and Media/Bleed/Trim boxes) is emitted when every source is CMYK and either one source declares an OutputIntent or the sources share a compatible ICC profile.
 
 ## Crop Marks
 
