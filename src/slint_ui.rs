@@ -32,7 +32,15 @@ pub fn run() -> Result<()> {
             if let Some(rx) = guard.as_mut()
                 && let Ok(status) = rx.try_recv()
             {
+                let level = if status.starts_with("Erreur") {
+                    2
+                } else if status.starts_with("PDF généré") {
+                    1
+                } else {
+                    0
+                };
                 ui.set_status(status.into());
+                ui.set_status_level(level);
                 ui.set_busy(false);
                 *guard = None;
             }
