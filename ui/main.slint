@@ -76,22 +76,23 @@ export component AppWindow inherits Window {
 
     VerticalLayout {
         padding: Theme.spacing-m;
-        spacing: Theme.spacing-s;
+        spacing: Theme.spacing-m;
         alignment: stretch;
 
         HorizontalLayout {
             spacing: Theme.spacing-m;
             vertical-stretch: 1;
-            alignment: center;
 
             ScrollView {
-                horizontal-stretch: 1;
-                max-width: 720px;
-                min-width: 320px;
+                horizontal-stretch: 3;
+                min-width: 420px;
+                viewport-width: self.visible-width;
+                horizontal-scrollbar-policy: ScrollBarPolicy.as-needed;
 
                 VerticalLayout {
                     spacing: Theme.spacing-m;
                     alignment: start;
+                    horizontal-stretch: 1;
 
                     Card {
                         title: "Sources (max. 2)";
@@ -101,14 +102,15 @@ export component AppWindow inherits Window {
 
                             Text { text: "Recto"; row: 0; col: 0; vertical-alignment: center; }
                             LineEdit { text: root.source-1; read-only: true; row: 0; col: 1; horizontal-stretch: 1; }
-                            Button { text: "Parcourir…"; enabled: !root.busy; row: 0; col: 2; clicked => { root.browse-source-one(); } }
+                            Button { text: "Parcourir…"; enabled: !root.busy; row: 0; col: 2; min-width: 100px; clicked => { root.browse-source-one(); } }
 
                             Text { text: "Verso"; row: 1; col: 0; vertical-alignment: center; }
                             LineEdit { text: root.source-2; read-only: true; row: 1; col: 1; horizontal-stretch: 1; }
-                            Button { text: "Parcourir…"; enabled: !root.busy; row: 1; col: 2; clicked => { root.browse-source-two(); } }
+                            Button { text: "Parcourir…"; enabled: !root.busy; row: 1; col: 2; min-width: 100px; clicked => { root.browse-source-two(); } }
                         }
                         HorizontalLayout {
                             alignment: end;
+                            spacing: Theme.spacing-s;
                             Button { text: "Retirer la dernière"; enabled: !root.busy; clicked => { root.remove-last-source(); } }
                         }
                     }
@@ -121,7 +123,7 @@ export component AppWindow inherits Window {
 
                             Text { text: "Dossier"; row: 0; col: 0; vertical-alignment: center; }
                             LineEdit { text <=> root.output-dir; row: 0; col: 1; horizontal-stretch: 1; }
-                            Button { text: "Dossier…"; enabled: !root.busy; row: 0; col: 2; clicked => { root.browse-output-directory(); } }
+                            Button { text: "Dossier…"; enabled: !root.busy; row: 0; col: 2; min-width: 100px; clicked => { root.browse-output-directory(); } }
 
                             Text { text: "Fichier"; row: 1; col: 0; vertical-alignment: center; }
                             LineEdit { text <=> root.output-name; row: 1; col: 1; horizontal-stretch: 1; }
@@ -130,63 +132,49 @@ export component AppWindow inherits Window {
 
                     Card {
                         title: "Options";
-                        VerticalLayout {
-                            spacing: Theme.spacing-s;
-                            alignment: start;
+                        GridLayout {
+                            spacing-horizontal: Theme.spacing-s;
+                            spacing-vertical: Theme.spacing-s;
 
-                            HorizontalLayout {
-                                spacing: Theme.spacing-m;
-                                VerticalLayout {
-                                    spacing: Theme.spacing-s;
-                                    Text { text: "Feuille"; }
-                                    ComboBox {
-                                        model: ["A4", "A3", "SRA3"];
-                                        current-index <=> root.sheet-index;
-                                    }
-                                }
-                                VerticalLayout {
-                                    spacing: Theme.spacing-s;
-                                    Text { text: "Orientation feuille"; }
-                                    ComboBox {
-                                        model: ["Auto", "Portrait", "Paysage"];
-                                        current-index <=> root.sheet-orientation-index;
-                                    }
-                                }
+                            Text { text: "Feuille"; row: 0; col: 0; }
+                            Text { text: "Orientation feuille"; row: 0; col: 1; }
+
+                            ComboBox {
+                                model: ["A4", "A3", "SRA3"];
+                                current-index <=> root.sheet-index;
+                                row: 1; col: 0; horizontal-stretch: 1;
+                            }
+                            ComboBox {
+                                model: ["Auto", "Portrait", "Paysage"];
+                                current-index <=> root.sheet-orientation-index;
+                                row: 1; col: 1; horizontal-stretch: 1;
                             }
 
-                            HorizontalLayout {
-                                spacing: Theme.spacing-m;
-                                VerticalLayout {
-                                    spacing: Theme.spacing-s;
-                                    Text { text: "Bord perdu (mm)"; }
-                                    LineEdit { text <=> root.bleed-text; preferred-width: 90px; horizontal-stretch: 0; }
-                                }
-                                VerticalLayout {
-                                    spacing: Theme.spacing-s;
-                                    Text { text: "Marge sécurité (mm)"; }
-                                    LineEdit { text <=> root.safety-text; preferred-width: 90px; horizontal-stretch: 0; }
-                                }
-                            }
+                            Text { text: "Bord perdu (mm)"; row: 2; col: 0; }
+                            Text { text: "Marge sécurité (mm)"; row: 2; col: 1; }
 
-                            HorizontalLayout {
-                                spacing: Theme.spacing-m;
-                                CheckBox { text: "Rotation des versos"; checked <=> root.rotate-verso; }
-                                CheckBox { text: "Rotation des poses"; checked <=> root.rotate-copies; }
-                            }
+                            LineEdit { text <=> root.bleed-text; row: 3; col: 0; horizontal-stretch: 1; min-width: 90px; }
+                            LineEdit { text <=> root.safety-text; row: 3; col: 1; horizontal-stretch: 1; min-width: 90px; }
+
+                            CheckBox { text: "Rotation des versos"; checked <=> root.rotate-verso; row: 4; col: 0; }
+                            CheckBox { text: "Rotation des poses"; checked <=> root.rotate-copies; row: 4; col: 1; }
                         }
                     }
                 }
             }
 
             ScrollView {
+                horizontal-stretch: 2;
+                min-width: 300px;
+                max-width: 640px;
                 preferred-width: 320px;
-                max-width: 380px;
-                min-width: 260px;
-                horizontal-stretch: 0;
+                viewport-width: self.visible-width;
+                horizontal-scrollbar-policy: ScrollBarPolicy.as-needed;
 
                 VerticalLayout {
                     spacing: Theme.spacing-m;
                     alignment: start;
+                    horizontal-stretch: 1;
 
                     Card {
                         title: "Prévisualisation";
@@ -229,6 +217,10 @@ export component AppWindow inherits Window {
                         }
                     }
 
+                    Rectangle {
+                        height: Theme.spacing-m;
+                    }
+
                     Text {
                         text: "- Max. 2 sources sélectionnables.\n- Plusieurs sources : seule la première page de chaque source est utilisée.\n- La prévisualisation utilise la première source disponible.\n- Les dimensions doivent correspondre à 0,5 pt près.";
                         font-size: Theme.font-secondary;
@@ -239,27 +231,30 @@ export component AppWindow inherits Window {
             }
         }
 
+        Rectangle {
+            height: 1px;
+            background: Palette.border;
+        }
+
         HorizontalLayout {
-            alignment: center;
-            VerticalLayout {
-                spacing: Theme.spacing-s;
-                alignment: center;
+            spacing: Theme.spacing-m;
+            padding-top: Theme.spacing-s;
 
-                Button {
-                    width: 220px;
-                    text: root.busy ? "Génération…" : "Générer";
-                    enabled: !root.busy;
-                    primary: true;
-                    clicked => { root.generate(); }
-                }
+            Text {
+                text: root.status;
+                wrap: word-wrap;
+                overflow: elide;
+                horizontal-stretch: 1;
+                font-size: Theme.font-small;
+                color: root.status-level == 2 ? #c42b1c : (root.status-level == 1 ? #107c10 : Palette.foreground);
+            }
 
-                Text {
-                    text: root.status;
-                    overflow: elide;
-                    horizontal-stretch: 1;
-                    font-size: Theme.font-small;
-                    color: root.status-level == 2 ? #c42b1c : (root.status-level == 1 ? #107c10 : Palette.foreground);
-                }
+            Button {
+                text: root.busy ? "Génération…" : "Générer";
+                enabled: !root.busy;
+                primary: true;
+                min-width: 160px;
+                clicked => { root.generate(); }
             }
         }
 
