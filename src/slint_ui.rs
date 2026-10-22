@@ -9,6 +9,8 @@ use std::sync::{Arc, Mutex};
 slint::include_modules!();
 
 pub fn run() -> Result<()> {
+    const APP_ID: &str = "io.github.Franck-Demongin.Imposer";
+    let _ = slint::set_xdg_app_id(APP_ID);
     let ui = AppWindow::new().map_err(|e| ImposerError::Generation(e.to_string()))?;
     let weak_ui = ui.as_weak();
 
