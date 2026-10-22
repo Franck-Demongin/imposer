@@ -108,7 +108,7 @@ Crop marks are derived from unique trim-box edges after optional 90° rotation:
 - tolerance: `0.01 mm`
 - mark count: `2 * (|X| + |Y|)`
 - marks are drawn only in the outer sheet margins
-- mark geometry: 3 mm, offset at least bleed (default 3 mm), 0.25 pt,
+- mark geometry: 2 mm, offset at least bleed (default 3 mm), 0.25 pt,
   registration color (`K 1 1 1 1`)
 - insufficient sheet margin returns `ImposerError::CropMarksMargin`
 

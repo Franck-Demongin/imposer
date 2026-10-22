@@ -519,7 +519,7 @@ pub fn draw_crop_marks(ops: &mut Vec<Operation>, plan: &LayoutPlan) -> Result<()
         .map(|p| p.trim_y + p.trim_h)
         .fold(f32::NEG_INFINITY, f32::max);
 
-    let length = mm_to_pt(3.0);
+    let length = mm_to_pt(2.0);
     let offset = mm_to_pt(3.0).max(plan.bleed);
 
     let eps = mm_to_pt(0.01);
