@@ -8,7 +8,6 @@ use lopdf::{
 use crate::config::ImpositionConfig;
 use crate::error::{ImposerError, Result};
 use crate::geometry::mm_to_pt;
-use crate::icc::IccProfile;
 use crate::layout::{LayoutPlan, compute_layout};
 use crate::source::{ImageColorSpace, SourceColorKind, SourceKind, SourcePage};
 
@@ -181,27 +180,28 @@ pub fn impose_sources(sources: &[SourcePage], config: &ImpositionConfig) -> Resu
     let all_source_cmyk = source_color_kind
         .iter()
         .all(|k| *k == SourceColorKind::Cmyk);
-    let common_profile = if all_source_cmyk {
-        let mut common: Option<Vec<u8>> = None;
-        let mut profiles_match = true;
+
+    // Validate that all CMYK sources share the same ICC profile (PDF or PSD).
+    // Comparison uses the parsed profile's SHA-256, so byte-for-byte identical
+    // streams are not required.
+    let mut detected_profiles: Vec<Option<crate::icc::IccProfile>> = Vec::new();
+    if all_source_cmyk {
         for src in sources {
-            match src.cmyk_profile_bytes() {
-                None => {
-                    profiles_match = false;
-                    break;
-                }
-                Some(bytes) => {
-                    if let Some(current) = common.as_ref()
-                        && current != &bytes
-                    {
-                        profiles_match = false;
-                        break;
-                    }
-                    common = Some(bytes);
-                }
-            }
+            detected_profiles.push(src.cmyk_profile());
         }
-        if profiles_match { common } else { None }
+    }
+    let present_profiles: Vec<&crate::icc::IccProfile> =
+        detected_profiles.iter().flatten().collect();
+    let distinct_profile_hashes: std::collections::HashSet<[u8; 32]> =
+        present_profiles.iter().map(|p| p.info.sha256).collect();
+    if all_source_cmyk && distinct_profile_hashes.len() > 1 {
+        return Err(ImposerError::IncompatibleProfiles(
+            source_color_labels.join(" ; "),
+        ));
+    }
+
+    let common_profile = if all_source_cmyk {
+        detected_profiles.into_iter().flatten().next()
     } else {
         None
     };
@@ -216,7 +216,8 @@ pub fn impose_sources(sources: &[SourcePage], config: &ImpositionConfig) -> Resu
 
     if x4_possible {
         if !catalog_has_output_intents {
-            if let Some(profile_bytes) = common_profile.as_ref() {
+            if let Some(profile) = common_profile.as_ref() {
+                let profile_bytes = profile.bytes.clone();
                 let mut icc_dict = Dictionary::new();
                 icc_dict.set("Type", Object::Name(b"ICCProfile".to_vec()));
                 icc_dict.set("N", Object::Integer(4));
@@ -227,9 +228,10 @@ pub fn impose_sources(sources: &[SourcePage], config: &ImpositionConfig) -> Resu
                     allows_compression: false,
                     start_position: None,
                 });
-                let condition = IccProfile::parse(profile_bytes)
-                    .ok()
-                    .and_then(|p| p.info.description)
+                let condition = profile
+                    .info
+                    .description
+                    .clone()
                     .unwrap_or_else(|| "Custom CMYK".to_string());
                 let mut intent = Dictionary::new();
                 intent.set("Type", Object::Name(b"OutputIntent".to_vec()));

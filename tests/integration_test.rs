@@ -1,5 +1,6 @@
 use imposer::config::{DocumentOrientation, SheetOrientation, SheetSize};
-use imposer::{ImpositionConfig, impose};
+use imposer::source::SourceColorKind;
+use imposer::{ImpositionConfig, impose, impose_sources, sources_from_bytes};
 use lopdf::Document;
 use std::fs;
 
@@ -139,6 +140,97 @@ fn too_many_sources_error() {
     let sources = sources_from_bytes(&inputs).unwrap();
     let cfg = ImpositionConfig::default();
     assert!(impose_sources(&sources, &cfg).is_err());
+}
+
+fn minimal_icc_profile() -> Vec<u8> {
+    let mut b = vec![0u8; 128];
+    // declared size = actual length
+    b[0..4].copy_from_slice(&128u32.to_be_bytes());
+    b[8] = 4; // ICC version major 4
+    b[12..16].copy_from_slice(b"prtr");
+    b[16..20].copy_from_slice(b"CMYK");
+    b[20..24].copy_from_slice(b"Lab ");
+    b[36..40].copy_from_slice(b"acsp");
+    b
+}
+
+fn build_minimal_psd(width: u32, height: u32, profile: Option<&[u8]>) -> Vec<u8> {
+    let mut b = Vec::new();
+    // Header
+    b.extend_from_slice(b"8BPS");
+    b.extend_from_slice(&1u16.to_be_bytes()); // version
+    b.extend_from_slice(&[0u8; 6]); // reserved
+    b.extend_from_slice(&4u16.to_be_bytes()); // channels
+    b.extend_from_slice(&height.to_be_bytes());
+    b.extend_from_slice(&width.to_be_bytes());
+    b.extend_from_slice(&8u16.to_be_bytes()); // depth
+    b.extend_from_slice(&4u16.to_be_bytes()); // color mode = CMYK
+
+    // Color mode data section: length + data
+    b.extend_from_slice(&0u32.to_be_bytes());
+
+    // Image resources section.
+    let mut resources = Vec::new();
+    if let Some(profile) = profile {
+        resources.extend_from_slice(b"8BIM");
+        resources.extend_from_slice(&0x040fu16.to_be_bytes()); // resource id = ICC profile
+        resources.push(0); // empty Pascal name
+        resources.push(0); // padding to even boundary
+        resources.extend_from_slice(&(profile.len() as u32).to_be_bytes());
+        resources.extend_from_slice(profile);
+        if profile.len() % 2 == 1 {
+            resources.push(0);
+        }
+    }
+    b.extend_from_slice(&(resources.len() as u32).to_be_bytes());
+    b.extend_from_slice(&resources);
+
+    // Layer and mask information section: length 0
+    b.extend_from_slice(&0u32.to_be_bytes());
+
+    // Image data section: raw compression.
+    b.extend_from_slice(&0u16.to_be_bytes());
+    let pixels = (width as usize) * (height as usize) * 4usize;
+    b.extend(std::iter::repeat_n(0u8, pixels));
+
+    b
+}
+
+#[test]
+fn psd_cmyk_single_page_output() {
+    let profile = minimal_icc_profile();
+    let psd = build_minimal_psd(120, 80, Some(&profile));
+    let sources = sources_from_bytes(&[psd]).unwrap();
+    assert_eq!(sources.len(), 1);
+    assert_eq!(sources[0].color_kind(), SourceColorKind::Cmyk);
+    assert_eq!(
+        sources[0].color_label(),
+        "CMJN (profil ICC embarqué)".to_string()
+    );
+
+    let cfg = ImpositionConfig {
+        sheet_size: SheetSize::A4,
+        sheet_orientation: SheetOrientation::Auto,
+        bleed_mm: 2.0,
+        safety_margin_mm: 5.0,
+        document_orientation: DocumentOrientation::Portrait,
+        rotate_copies: true,
+    };
+    let bytes = impose_sources(&sources, &cfg).unwrap();
+    let doc = Document::load_mem(&bytes).unwrap();
+    assert_eq!(doc.get_pages().len(), 1);
+
+    let raw = String::from_utf8_lossy(&bytes);
+    assert!(raw.contains("ICCBased"));
+    assert!(raw.contains("GTS_PDFX"));
+    assert!(raw.contains("PDF/X-4"));
+}
+
+#[test]
+fn psd_cmyk_without_profile_is_rejected() {
+    let psd = build_minimal_psd(8, 8, None);
+    let res = sources_from_bytes(&[psd]);
+    assert!(res.is_err(), "{:?}", res.err());
 }
 
 fn output_intents_count(doc: &Document) -> usize {

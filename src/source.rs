@@ -76,15 +76,29 @@ impl SourcePage {
         }
     }
 
-    pub fn cmyk_profile_bytes(&self) -> Option<Vec<u8>> {
+    pub fn cmyk_profile(&self) -> Option<IccProfile> {
         match &self.kind {
-            SourceKind::Raster { icc_profile, .. } => icc_profile.clone(),
+            SourceKind::Raster {
+                color_space,
+                icc_profile,
+                ..
+            } => match color_space {
+                ImageColorSpace::DeviceCmyk => icc_profile
+                    .as_deref()
+                    .and_then(|b| IccProfile::parse(b).ok()),
+                _ => None,
+            },
             SourceKind::PdfPage { bytes, page_index } => {
                 let src = open_pdf_source(bytes.clone()).ok()?;
-                let det = crate::profile::detect_cmyk_profile(&src, *page_index, None).ok()?;
-                det.profile.map(|p| p.bytes)
+                crate::profile::detect_cmyk_profile(&src, *page_index, None)
+                    .ok()?
+                    .profile
             }
         }
+    }
+
+    pub fn cmyk_profile_bytes(&self) -> Option<Vec<u8>> {
+        self.cmyk_profile().map(|p| p.bytes)
     }
 }
 
@@ -271,18 +285,32 @@ fn jpeg_dpi(bytes: &[u8]) -> Option<(f32, f32)> {
 
 // ---------- PSD ----------
 fn parse_psd(bytes: &[u8]) -> Result<SourcePage> {
+    let cmyk_mode = psd_color_mode(bytes) == Some(4);
     match parse_psd_zune(bytes) {
         Ok(s) => Ok(s),
         Err(e @ ImposerError::NoProfile)
         | Err(e @ ImposerError::InvalidIcc(_))
         | Err(e @ ImposerError::AmbiguousProfile) => Err(e),
+        // CMYK PSDs must not be silently downgraded to an RGB approximation.
+        Err(e) if cmyk_mode => Err(e),
         Err(_) => parse_psd_legacy(bytes),
     }
+}
+
+fn psd_color_mode(bytes: &[u8]) -> Option<u16> {
+    if bytes.len() < 26 || !bytes.starts_with(b"8BPS") {
+        return None;
+    }
+    // PSD header: signature(4) version(2) reserved(6) channels(2)
+    // height(4) width(4) depth(2) color_mode(2) => color_mode at offset 24.
+    Some(u16::from_be_bytes(bytes[24..26].try_into().ok()?))
 }
 
 fn parse_psd_zune(bytes: &[u8]) -> Result<SourcePage> {
     use zune_psd::PSDDecoder;
     use zune_psd::zune_core::bytestream::ZCursor;
+
+    let (dpi_x, dpi_y) = extract_psd_resolution(bytes).unwrap_or((300.0, 300.0));
 
     let mut decoder = PSDDecoder::new(ZCursor::new(bytes));
     decoder
@@ -341,8 +369,8 @@ fn parse_psd_zune(bytes: &[u8]) -> Result<SourcePage> {
             let inverted: Vec<u8> = raw.iter().map(|v| 255u8.wrapping_sub(*v)).collect();
             let icc_bytes = extract_psd_embedded_profile(bytes).ok_or(ImposerError::NoProfile)?;
             IccProfile::parse(&icc_bytes).map_err(|e| ImposerError::InvalidIcc(e.to_string()))?;
-            let width_pt = w as f32 / 300.0 * 72.0;
-            let height_pt = h as f32 / 300.0 * 72.0;
+            let width_pt = w as f32 / dpi_x * 72.0;
+            let height_pt = h as f32 / dpi_y * 72.0;
             return Ok(SourcePage {
                 width_pt,
                 height_pt,
@@ -366,8 +394,8 @@ fn parse_psd_zune(bytes: &[u8]) -> Result<SourcePage> {
         w as u32,
         h as u32,
         rgb,
-        300.0,
-        300.0,
+        dpi_x,
+        dpi_y,
         ImageColorSpace::DeviceRgb,
     ))
 }
@@ -505,6 +533,77 @@ fn make_raster_source(
             icc_profile: None,
         },
     }
+}
+
+fn extract_psd_resolution(bytes: &[u8]) -> Option<(f32, f32)> {
+    let (cmd_len, header_end, resources_off, reslen, resources_end) =
+        psd_resource_block_bounds(bytes)?;
+    let mut pos = resources_off;
+    while pos + 10 <= resources_end {
+        if &bytes[pos..pos + 4] != b"8BIM" {
+            break;
+        }
+        let rid = u16::from_be_bytes(bytes[pos + 4..pos + 6].try_into().ok()?) as u32;
+        let name_len = bytes[pos + 6] as usize;
+        let mut field = 1usize + name_len;
+        if field % 2 == 1 {
+            field += 1;
+        }
+        let size_off = pos + 6 + field;
+        if size_off + 4 > resources_end {
+            break;
+        }
+        let size = u32::from_be_bytes(bytes[size_off..size_off + 4].try_into().ok()?) as usize;
+        let data_off = size_off + 4;
+        if data_off + size > resources_end {
+            break;
+        }
+        if rid == 0x03ED && size >= 16 {
+            let data = &bytes[data_off..data_off + size];
+            let h_fixed = u32::from_be_bytes(data[0..4].try_into().ok()?);
+            let h_unit = u16::from_be_bytes(data[4..6].try_into().ok()?);
+            let v_fixed = u32::from_be_bytes(data[8..12].try_into().ok()?);
+            let v_unit = u16::from_be_bytes(data[12..14].try_into().ok()?);
+            let dpi_x = fixed_psd_resolution(h_fixed, h_unit);
+            let dpi_y = fixed_psd_resolution(v_fixed, v_unit);
+            if dpi_x > 0.0 && dpi_y > 0.0 {
+                return Some((dpi_x, dpi_y));
+            }
+        }
+        pos = data_off + size;
+        if pos % 2 == 1 {
+            pos += 1;
+        }
+    }
+    // keep compiler happy about unused bounds variables
+    let _ = (cmd_len, header_end, resources_off, reslen, resources_end);
+    None
+}
+
+fn fixed_psd_resolution(fixed: u32, unit: u16) -> f32 {
+    let value = fixed as f32 / 65536.0;
+    match unit {
+        2 => value * 2.54, // pixels per cm -> dpi
+        _ => value,        // pixels per inch (or unknown -> assume inch)
+    }
+}
+
+fn psd_resource_block_bounds(bytes: &[u8]) -> Option<(usize, usize, usize, usize, usize)> {
+    if bytes.len() < 34 {
+        return None;
+    }
+    let cmd_len = u32::from_be_bytes(bytes[26..30].try_into().ok()?) as usize;
+    let header_end = 30usize.checked_add(cmd_len)?;
+    let resources_off = header_end.checked_add(4)?;
+    if resources_off > bytes.len() {
+        return None;
+    }
+    let reslen = u32::from_be_bytes(bytes[header_end..resources_off].try_into().ok()?) as usize;
+    let resources_end = resources_off.checked_add(reslen)?;
+    if resources_end > bytes.len() {
+        return None;
+    }
+    Some((cmd_len, header_end, resources_off, reslen, resources_end))
 }
 
 fn extract_psd_embedded_profile(bytes: &[u8]) -> Option<Vec<u8>> {

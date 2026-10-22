@@ -1,6 +1,68 @@
 //! Contrôles des sources et de la sortie (preflight).
 
-use crate::source::SourcePdf;
+use crate::source::{SourcePage, SourcePdf};
+
+pub fn preflight_source(source: &SourcePage) -> PreflightReport {
+    match &source.kind {
+        crate::source::SourceKind::PdfPage { bytes, .. } => {
+            match crate::source::open_pdf_source(bytes.clone()) {
+                Ok(src) => preflight_with(&src, ColorPolicy::Strict),
+                Err(e) => {
+                    let mut report = PreflightReport::default();
+                    report.errors.push(format!("source PDF illisible : {e}"));
+                    report
+                }
+            }
+        }
+        crate::source::SourceKind::Raster {
+            pixels,
+            width_px,
+            height_px,
+            color_space,
+            icc_profile,
+        } => {
+            let mut report = PreflightReport::default();
+            if *width_px == 0 || *height_px == 0 {
+                report
+                    .errors
+                    .push("dimensions raster invalides".to_string());
+                return report;
+            }
+            match color_space {
+                crate::source::ImageColorSpace::DeviceCmyk => {
+                    if pixels.len() != *width_px as usize * *height_px as usize * 4 {
+                        report.errors.push(format!(
+                            "données raster CMJN incomplètes ({} octets attendus)",
+                            *width_px as usize * *height_px as usize * 4
+                        ));
+                    }
+                    match icc_profile {
+                        Some(bytes) => {
+                            if crate::IccProfile::parse(bytes).is_err() {
+                                report.errors.push("profil ICC CMJN invalide".to_string());
+                            }
+                        }
+                        None => {
+                            report
+                                .errors
+                                .push("aucun profil ICC CMJN détecté".to_string());
+                        }
+                    }
+                }
+                crate::source::ImageColorSpace::DeviceGray
+                | crate::source::ImageColorSpace::DeviceRgb => {
+                    if pixels.len() != *width_px as usize * *height_px as usize * 3 {
+                        report.errors.push(format!(
+                            "données raster RVB incomplètes ({} octets attendus)",
+                            *width_px as usize * *height_px as usize * 3
+                        ));
+                    }
+                }
+            }
+            report
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ColorPolicy {

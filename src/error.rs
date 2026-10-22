@@ -21,6 +21,8 @@ pub enum ImposerError {
     Io(#[from] std::io::Error),
     #[error("conflit de couleur des sources : {0}")]
     MixedSourceColors(String),
+    #[error("profils ICC des sources incompatibles : {0}")]
+    IncompatibleProfiles(String),
     #[error("aucun profil ICC CMJN détecté")]
     NoProfile,
     #[error("plusieurs profils ICC CMJN distincts détectés")]
