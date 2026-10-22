@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Imposer
+Comment=Imposition de documents PDF, PNG, JPEG et PSD sur des planches A4, A3 ou SRA3
+Exec=imposer-gui
+Icon=io.github.Franck-Demongin.Imposer
+Terminal=false
+Categories=Graphics;Publishing;
+StartupWMClass=io.github.Franck-Demongin.Imposer
