@@ -31,6 +31,14 @@ jobs:
 
       - run: cargo fmt --check
       - run: cargo test
+      - name: Check application icon files
+        run: |
+          test -f assets/icons/imposer-256.png
+          test -f assets/icons/imposer-32.png
+          test -f assets/icons/imposer-16.png
+          test -f assets/icons/imposer.svg
+          test -f assets/icons/imposer.ico
+          test -f packaging/linux/io.github.Franck-Demongin.Imposer.desktop
 
       - name: Build without GUI feature
         run: cargo build

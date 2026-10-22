@@ -108,6 +108,43 @@ cargo run --features gui --bin imposer-gui
 Ce build produit deux exécutables : `imposer` (CLI et TUI) et `imposer-gui`
 (interface graphique Slint), dont les deux sont publiés par la release.
 
+## Icône et intégration au bureau
+
+### Linux
+
+La barre des tâches lit l'icône via le fichier `.desktop` et l'`app_id`
+`io.github.Franck-Demongin.Imposer`. Pour installer localement :
+
+```sh
+cargo build --release --features gui --bin imposer-gui
+./packaging/linux/install-local.sh
+```
+
+Le script copie le binaire `target/release/imposer-gui` et
+`packaging/linux/io.github.Franck-Demongin.Imposer.desktop`, installe les PNG et
+le SVG dans `~/.local/share/icons/hicolor`, puis met à jour les caches s'ils sont
+disponibles. Pour supprimer cette installation :
+
+```sh
+./packaging/linux/uninstall-local.sh
+```
+
+Avec `cargo run`, GNOME n'affiche l'icône correcte qu'après installation du
+`.desktop`. Le fichier est également fourni dans `packaging/linux`.
+
+### Windows
+
+L'icône est embarquée à la compilation dans l'exécutable `imposer-gui.exe` via
+`winresource` et `build.rs` (`assets/icons/imposer.ico`). Aucune action manuelle
+n'est nécessaire.
+
+### Remplacer l'icône
+
+Remplacez `assets/icons/imposer.svg` et les fichiers PNG/ICO, ou exécutez
+`assets/icons/generate.sh` avec `rsvg-convert`/ImageMagick si le fichier source
+a changé. Les fichiers générés sont versionnés pour que le build normal ne
+dépende pas de ces outils.
+
 ## Utilisation CLI
 
 Une source :
