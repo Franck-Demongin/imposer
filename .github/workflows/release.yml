@@ -33,12 +33,15 @@ jobs:
             fi
             printf '\n'
           } > release_notes.md
-      - run: cargo build --release
+      - run: cargo build --release --bin imposer
+      - run: cargo build --release --features slint-ui --bin imposer-gui
       - uses: softprops/action-gh-release@v2
         with:
           name: Imposer ${{ github.ref_name }}
           body_path: release_notes.md
-          files: target/release/imposer.exe
+          files: |
+            target/release/imposer.exe
+            target/release/imposer-gui.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -48,10 +51,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo build --release
+      - run: cargo build --release --bin imposer
+      - run: cargo build --release --features slint-ui --bin imposer-gui
       - uses: softprops/action-gh-release@v2
         with:
           name: Imposer ${{ github.ref_name }}
-          files: target/release/imposer
+          files: |
+            target/release/imposer
+            target/release/imposer-gui
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

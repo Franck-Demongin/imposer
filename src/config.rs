@@ -1,3 +1,4 @@
+use crate::error::{ImposerError, Result};
 use clap::ValueEnum;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -45,5 +46,21 @@ impl Default for ImpositionConfig {
             rotate_verso: false,
             rotate_copies: true,
         }
+    }
+}
+
+impl ImpositionConfig {
+    pub fn validate(&self) -> Result<()> {
+        if !self.bleed_mm.is_finite() || self.bleed_mm < 0.0 {
+            return Err(ImposerError::Generation(
+                "bord perdu négatif ou invalide".to_string(),
+            ));
+        }
+        if !self.safety_margin_mm.is_finite() || self.safety_margin_mm < 0.0 {
+            return Err(ImposerError::Generation(
+                "marge de sécurité négative ou invalide".to_string(),
+            ));
+        }
+        Ok(())
     }
 }

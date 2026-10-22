@@ -2,6 +2,7 @@
 
 pub mod config;
 pub mod error;
+pub mod generation;
 pub mod geometry;
 pub mod icc;
 pub mod import;
@@ -14,7 +15,10 @@ pub mod profile;
 pub mod source;
 
 pub use config::ImpositionConfig;
+pub use config::ImpositionConfig as ImposeOptions;
 pub use error::{ImposerError, Result};
+pub use generation::GenerateReport;
+pub use generation::{generate, parse_source_bytes, read_source_pages, validate_options};
 pub use geometry::{Size, mm_to_pt, pt_to_mm};
 pub use icc::{IccProfile, ProfileMatch};
 pub use import::ImportedPage;

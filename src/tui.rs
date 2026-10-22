@@ -8,7 +8,7 @@ use crossterm::terminal::{
 };
 use imposer::config::{ImpositionConfig, SheetOrientation, SheetSize};
 
-use imposer::{ImposerError, Result, SourcePage, impose_sources, sources_from_bytes};
+use imposer::{ImposerError, Result, SourcePage, generate, read_source_pages, sources_from_bytes};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout};
@@ -982,7 +982,7 @@ fn render_text_field(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn run_imposition_work(
+pub fn run_imposition_work(
     source_paths: Vec<PathBuf>,
     destination: PathBuf,
     sheet: SheetSize,
@@ -992,40 +992,10 @@ fn run_imposition_work(
     safety: f32,
     rotate: bool,
 ) -> String {
-    let mut input_bytes = Vec::with_capacity(source_paths.len());
-    for path in &source_paths {
-        match fs::read(path) {
-            Ok(b) => input_bytes.push(b),
-            Err(e) => {
-                return format!("Erreur lecture {} : {e}", path.display());
-            }
-        }
-    }
-
-    let selected_count = source_paths.len();
-    let mut sources = Vec::new();
-    for (offset, bytes) in input_bytes.into_iter().enumerate() {
-        match sources_from_bytes(std::slice::from_ref(&bytes)) {
-            Ok(parsed) => {
-                if selected_count > 1 && parsed.len() > 1 {
-                    // Plusieurs sources choisies: chaque PDF contribue sa première page.
-                    if let Some(first) = parsed.first() {
-                        sources.push(first.clone());
-                    } else {
-                        return format!(
-                            "Erreur : source vide pour \"{}\".",
-                            source_paths[offset].display()
-                        );
-                    }
-                } else {
-                    sources.extend(parsed);
-                }
-            }
-            Err(e) => {
-                return format!("Erreur source \"{}\" : {e}", source_paths[offset].display());
-            }
-        }
-    }
+    let sources = match read_source_pages(&source_paths) {
+        Ok(s) => s,
+        Err(e) => return e.to_string(),
+    };
 
     let config = ImpositionConfig {
         sheet_size: sheet,
@@ -1041,19 +1011,21 @@ fn run_imposition_work(
         .map(|source: &SourcePage| source.color_label())
         .collect();
 
-    match impose_sources(&sources, &config) {
-        Ok(bytes) => match fs::write(&destination, &bytes) {
-            Ok(()) => {
-                format!(
-                    "PDF généré : {} ({} octets) — profils : {}",
-                    destination.display(),
-                    bytes.len(),
-                    profiles.join(" ; ")
-                )
+    match generate(&sources, &config, destination) {
+        Ok(report) => format!(
+            "PDF généré : {} ({} octets) — profils : {}",
+            report.output_path.display(),
+            report.output_size,
+            if report.profiles.is_empty() {
+                profiles.join(" ; ")
+            } else {
+                report.profiles.join(" ; ")
             }
-            Err(e) => format!("Erreur écriture : {e}"),
+        ),
+        Err(e) => match e {
+            ImposerError::Io(err) => format!("Erreur écriture : {err}"),
+            other => format!("Erreur : {other}"),
         },
-        Err(e) => format!("Erreur : {e}"),
     }
 }
 

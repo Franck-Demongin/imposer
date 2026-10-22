@@ -1,0 +1,223 @@
+import { Button, ComboBox, CheckBox, LineEdit, VerticalBox, HorizontalBox } from "std-widgets.slint";
+
+export struct PreviewPlacement {
+    x: float,
+    y: float,
+    w: float,
+    h: float
+}
+
+export component AppWindow inherits Window {
+    title: "Imposer - Slint";
+    width: 1080px;
+    height: 760px;
+    preferred-width: 1080px;
+    preferred-height: 760px;
+
+    in property <string> status: "Prêt.";
+    in property <bool> busy: false;
+    in property <string> source-1: "";
+    in property <string> source-2: "";
+
+    in-out property <string> output-dir: "";
+    in-out property <string> output-name: "";
+
+    in-out property <int> sheet-index: 0;
+    in-out property <int> sheet-orientation-index: 0;
+    in-out property <bool> rotate-verso: false;
+    in-out property <string> bleed-text: "2.0";
+    in-out property <string> safety-text: "5.0";
+    in-out property <bool> rotate-copies: true;
+
+    in property <float> preview-width: 0;
+    in property <float> preview-height: 0;
+    in property <[PreviewPlacement]> preview-placements: [];
+
+    callback browse-source-one();
+    callback browse-source-two();
+    callback remove-last-source();
+    callback browse-output-directory();
+    callback generate();
+    callback refresh-preview();
+
+    HorizontalBox {
+        padding: 10px;
+        spacing: 10px;
+
+        VerticalBox {
+            horizontal-stretch: 1;
+            max-width: 680px;
+            padding: 10px;
+            spacing: 8px;
+
+            Text {
+                text: "Imposer - Interface graphique Slint";
+                font-size: 18px;
+                font-weight: 700;
+            }
+
+            Text { text: "Sources (max. 2)"; font-weight: 700; }
+            VerticalBox {
+                HorizontalBox {
+                    LineEdit { text: root.source-1; read-only: true; placeholder-text: "Source 1"; horizontal-stretch: 1; }
+                    Button { text: "Parcourir…"; enabled: !root.busy; clicked => { root.browse-source-one(); } }
+                }
+                HorizontalBox {
+                    LineEdit { text: root.source-2; read-only: true; placeholder-text: "Source 2 (optionnel)"; horizontal-stretch: 1; }
+                    Button { text: "Parcourir…"; enabled: !root.busy; clicked => { root.browse-source-two(); } }
+                }
+                HorizontalBox {
+                    Button { text: "Retirer la dernière"; enabled: !root.busy; clicked => { root.remove-last-source(); } }
+                }
+            }
+
+            Text { text: "Sortie"; font-weight: 700; }
+            VerticalBox {
+                HorizontalBox {
+                    LineEdit { text <=> root.output-dir; placeholder-text: "Dossier de sortie"; horizontal-stretch: 1; }
+                    Button { text: "Dossier…"; enabled: !root.busy; clicked => { root.browse-output-directory(); } }
+                }
+                LineEdit { text <=> root.output-name; placeholder-text: "Nom de sortie"; horizontal-stretch: 1; }
+            }
+
+            Text { text: "Options"; font-weight: 700; }
+            VerticalBox {
+                spacing: 8px;
+                HorizontalBox {
+                    spacing: 8px;
+                    VerticalBox {
+                        horizontal-stretch: 1;
+                        Text { text: "Feuille"; }
+                        ComboBox {
+                            horizontal-stretch: 1;
+                            model: ["A4", "A3", "SRA3"];
+                            current-index <=> root.sheet-index;
+                        }
+                    }
+                    VerticalBox {
+                        horizontal-stretch: 1;
+                        Text { text: "Orientation feuille"; }
+                        ComboBox {
+                            horizontal-stretch: 1;
+                            model: ["Auto", "Portrait", "Paysage"];
+                            current-index <=> root.sheet-orientation-index;
+                        }
+                    }
+                }
+                HorizontalBox {
+                    spacing: 8px;
+                    VerticalBox {
+                        horizontal-stretch: 1;
+                        Text { text: "Rotation des versos"; }
+                        CheckBox {
+                            checked <=> root.rotate-verso;
+                            text: root.rotate-verso ? "Activée" : "Désactivée";
+                        }
+                    }
+                    VerticalBox {
+                        horizontal-stretch: 1;
+                        Text { text: "Rotation des poses"; }
+                        CheckBox { checked <=> root.rotate-copies; }
+                    }
+                }
+                HorizontalBox {
+                    spacing: 8px;
+                    VerticalBox {
+                        horizontal-stretch: 1;
+                        Text { text: "Bord perdu (mm)"; }
+                        LineEdit { width: 80px; text <=> root.bleed-text; }
+                    }
+                    VerticalBox {
+                        horizontal-stretch: 1;
+                        Text { text: "Marge sécurité (mm)"; }
+                        LineEdit { width: 80px; text <=> root.safety-text; }
+                    }
+                }
+            }
+
+            Text { text: "Action"; font-weight: 700; }
+            VerticalBox {
+                spacing: 8px;
+                HorizontalBox {
+                    width: 100%;
+                    alignment: center;
+                    Button {
+                        width: 220px;
+                        text: root.busy ? "Génération…" : "Générer";
+                        enabled: !root.busy;
+                        primary: true;
+                        clicked => { root.generate(); }
+                    }
+                }
+                Text {
+                    text: root.status;
+                    wrap: word-wrap;
+                    horizontal-stretch: 1;
+                }
+            }
+        }
+
+        VerticalBox {
+            min-width: 340px;
+            preferred-width: 340px;
+            padding: 10px;
+            spacing: 8px;
+
+            Text { text: "Prévisualisation"; font-weight: 700; }
+
+            Rectangle {
+                width: 300px;
+                height: 300px;
+                background: #101010;
+                border-width: 1px;
+                border-color: #888888;
+                Rectangle {
+                    x: 0px;
+                    y: 0px;
+                    width: (root.preview-width * 1px);
+                    height: (root.preview-height * 1px);
+                    for placement in root.preview-placements: Rectangle {
+                        x: placement.x * 1px;
+                        y: placement.y * 1px;
+                        width: placement.w * 1px;
+                        height: placement.h * 1px;
+                        background: #33cccc33;
+                        border-width: 1px;
+                        border-color: #33ccff;
+                    }
+                }
+            }
+
+            Text { text: "Récapitulatif"; font-weight: 700; }
+            VerticalBox {
+                spacing: 4px;
+                Text { text: "Source 1 : " + (root.source-1 == "" ? "(aucune)" : root.source-1); wrap: word-wrap; horizontal-stretch: 1; }
+                Text { text: "Source 2 : " + (root.source-2 == "" ? "(aucune)" : root.source-2); wrap: word-wrap; horizontal-stretch: 1; }
+                Text { text: "Dossier : " + (root.output-dir == "" ? "(non défini)" : root.output-dir); wrap: word-wrap; horizontal-stretch: 1; }
+                Text { text: "Fichier : " + (root.output-name == "" ? "(non défini)" : root.output-name); wrap: word-wrap; horizontal-stretch: 1; }
+                Text { text: "Feuille : " + (root.sheet-index == 0 ? "A4" : (root.sheet-index == 1 ? "A3" : "SRA3")); }
+                Text { text: "Orientation feuille : " + (root.sheet-orientation-index == 0 ? "Auto" : (root.sheet-orientation-index == 1 ? "Portrait" : "Paysage")); }
+                Text { text: "Rotation des versos : " + (root.rotate-verso ? "Oui" : "Non"); }
+                Text { text: "Bord perdu : " + root.bleed-text + " mm"; }
+                Text { text: "Marge sécurité : " + root.safety-text + " mm"; }
+                Text { text: "Rotation des poses : " + (root.rotate-copies ? "Oui" : "Non"); }
+            }
+
+            Text { text: "Aide succincte"; font-weight: 700; }
+            VerticalBox {
+                spacing: 4px;
+                Text { text: "- Max. 2 sources sélectionnables."; wrap: word-wrap; horizontal-stretch: 1; }
+                Text { text: "- Plusieurs sources : seule la première page de chaque source est utilisée."; wrap: word-wrap; horizontal-stretch: 1; }
+                Text { text: "- La prévisualisation utilise la première source disponible."; wrap: word-wrap; horizontal-stretch: 1; }
+                Text { text: "- Les dimensions doivent correspondre à 0,5 pt près."; wrap: word-wrap; horizontal-stretch: 1; }
+            }
+        }
+    }
+
+    changed sheet-index => { root.refresh-preview(); }
+    changed sheet-orientation-index => { root.refresh-preview(); }
+    changed rotate-verso => { root.refresh-preview(); }
+    changed bleed-text => { root.refresh-preview(); }
+    changed safety-text => { root.refresh-preview(); }
+    changed rotate-copies => { root.refresh-preview(); }
+}

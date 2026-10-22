@@ -90,6 +90,24 @@ défaut comme recto, de retirer la dernière source avec `Suppr`, et d'ajuster l
 options avant l'exécution. Un seul PDF peut fournir ses deux pages ; avec
 plusieurs sources, seule la première page de chaque PDF est utilisée.
 
+
+## Interface graphique optionnelle (Slint)
+
+La GUI est disponible uniquement en compilant avec la feature optionnelle
+`slint-ui` ou `gui` (alias) :
+
+```sh
+cargo build --release --features gui
+./target/release/imposer-gui
+```
+ou en développement :
+```sh
+cargo run --features gui --bin imposer-gui
+```
+
+Ce build produit deux exécutables : `imposer` (CLI et TUI) et `imposer-gui`
+(interface graphique Slint), dont les deux sont publiés par la release.
+
 ## Utilisation CLI
 
 Une source :

@@ -1,5 +1,5 @@
 use clap::Parser;
-use imposer::{ImpositionConfig, SourcePage, impose_sources, sources_from_bytes};
+use imposer::{ImposeOptions, SourcePage, generate, sources_from_bytes};
 use std::fs;
 use std::path::PathBuf;
 
@@ -53,6 +53,8 @@ fn main() {
 
     let output = cli.output.unwrap();
 
+    // Utilise le dossier des sources si l'option `--input` est passée ;
+    // la lecture est conservée telle que précédemment.
     let mut inputs: Vec<Vec<u8>> = Vec::new();
     for p in &cli.input {
         match fs::read(p) {
@@ -74,7 +76,7 @@ fn main() {
 
     let color_report: Vec<String> = sources.iter().map(SourcePage::color_label).collect();
     println!("Profils couleur détectés : {}", color_report.join(" ; "));
-    let config = ImpositionConfig {
+    let config = ImposeOptions {
         sheet_size: cli.sheet,
         sheet_orientation: cli.sheet_orientation,
         bleed_mm: cli.bleed,
@@ -83,13 +85,13 @@ fn main() {
         rotate_copies: !cli.no_rotate_copies,
     };
 
-    match impose_sources(&sources, &config) {
-        Ok(bytes) => {
-            if let Err(e) = fs::write(&output, &bytes) {
-                eprintln!("erreur écriture sortie : {e}");
-                std::process::exit(1);
-            }
-            println!("PDF généré : {} ({} octets)", output.display(), bytes.len());
+    match generate(&sources, &config, output) {
+        Ok(report) => {
+            println!(
+                "PDF généré : {} ({} octets)",
+                report.output_path.display(),
+                report.output_size
+            );
         }
         Err(e) => {
             eprintln!("erreur : {e}");
