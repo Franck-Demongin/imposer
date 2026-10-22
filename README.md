@@ -93,9 +93,10 @@ plusieurs sources, seule la première page de chaque PDF est utilisée.
 
 ## Interface graphique optionnelle (Slint)
 
+![Capture de l'interface graphique Slint](assets/screen_gui.png)
+
 La GUI est disponible uniquement en compilant avec la feature optionnelle
 `slint-ui` ou `gui` (alias) :
-
 ```sh
 cargo build --release --features gui
 ./target/release/imposer-gui
