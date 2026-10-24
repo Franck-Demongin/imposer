@@ -307,33 +307,16 @@ fn parse_psd(bytes: &[u8]) -> Result<SourcePage> {
             )
             .is_ok()
         {
-            // Load the flattened TIFF. The final ICC/CMYK certification is
-            // performed later by Ghostscript, so this stays RGB.
-            let loaded = image::open(&tiff_output)
-                .ok()
-                .map(|img| (img.width(), img.height(), img.to_rgb8()));
+            let loaded = load_flattened_psd_tiff(tiff_output.as_path(), dpi, bytes);
             let _ = std::fs::remove_file(&psd_input);
             let _ = std::fs::remove_file(&tiff_output);
-            if let Some((w, h, rgb)) = loaded
-                && rgb.len() == (w * h * 3) as usize
-            {
-                let width_pt = w as f32 / dpi.0 * 72.0;
-                let height_pt = h as f32 / dpi.1 * 72.0;
-                return Ok(SourcePage {
-                    width_pt,
-                    height_pt,
-                    kind: SourceKind::Raster {
-                        pixels: rgb.into_raw(),
-                        width_px: w,
-                        height_px: h,
-                        color_space: ImageColorSpace::DeviceRgb,
-                        icc_profile: None,
-                    },
-                });
+            if let Ok(source) = loaded {
+                return Ok(source);
             }
+        } else {
+            let _ = std::fs::remove_file(&psd_input);
+            let _ = std::fs::remove_file(&tiff_output);
         }
-        let _ = std::fs::remove_file(&psd_input);
-        let _ = std::fs::remove_file(&tiff_output);
     }
 
     let cmyk_mode = psd_color_mode(bytes) == Some(4);
@@ -822,4 +805,121 @@ pub fn decompress_stream(stream: &lopdf::Stream) -> crate::error::Result<Vec<u8>
     stream
         .decompressed_content()
         .map_err(|e| crate::error::ImposerError::UnsupportedFilter(e.to_string()))
+}
+
+fn load_flattened_psd_tiff(
+    path: &std::path::Path,
+    dpi: (f32, f32),
+    source_bytes: &[u8],
+) -> Result<SourcePage> {
+    use std::fs::File;
+    use std::io::BufReader;
+    use tiff::decoder::{Decoder, DecodingResult};
+    use tiff::tags::Tag;
+
+    let mut decoder =
+        Decoder::new(BufReader::new(File::open(path).map_err(|e| {
+            ImposerError::Parse(format!("fichier TIFF illisible : {e}"))
+        })?))
+        .map_err(|e| ImposerError::Parse(format!("décodeur TIFF PSD invalide : {e}")))?;
+
+    let (width_px, height_px) = decoder
+        .dimensions()
+        .map_err(|e| ImposerError::Parse(format!("dimensions TIFF PSD invalides : {e}")))?;
+    let color_type = decoder
+        .colortype()
+        .map_err(|e| ImposerError::Parse(format!("ColorType TIFF PSD invalide : {e}")))?;
+
+    let icc_from_tiff = decoder.get_tag_u8_vec(Tag::IccProfile).ok();
+    let decoded = decoder
+        .read_image()
+        .map_err(|e| ImposerError::Parse(format!("pixels TIFF PSD illisibles : {e}")))?;
+
+    let raw = match decoded {
+        DecodingResult::U8(v) => v,
+        DecodingResult::U16(v) => v.iter().map(|sample| (*sample >> 8) as u8).collect(),
+        _ => {
+            return Err(ImposerError::Parse(
+                "échantillonnage TIFF PSD non supporté".to_string(),
+            ));
+        }
+    };
+
+    let raw_samples = match color_type {
+        tiff::ColorType::Gray(_) => 1,
+        tiff::ColorType::GrayA(_) => 2,
+        tiff::ColorType::RGB(_) => 3,
+        tiff::ColorType::RGBA(_) => 4,
+        tiff::ColorType::CMYK(_) => 4,
+        tiff::ColorType::CMYKA(_) => 5,
+        _ => {
+            return Err(ImposerError::Parse(format!(
+                "ColorType TIFF PSD non supporté : {:?}",
+                color_type
+            )));
+        }
+    };
+    let expected_len = width_px as usize * height_px as usize * raw_samples;
+    if raw.len() != expected_len {
+        return Err(ImposerError::Parse(format!(
+            "taille pixels TIFF PSD inattendue : {} != {}",
+            raw.len(),
+            expected_len
+        )));
+    }
+
+    let mut pixels = Vec::with_capacity(width_px as usize * height_px as usize * 3);
+    let is_cmyk = matches!(
+        color_type,
+        tiff::ColorType::CMYK(_) | tiff::ColorType::CMYKA(_)
+    );
+
+    for chunk in raw.chunks(raw_samples) {
+        match color_type {
+            tiff::ColorType::Gray(_) | tiff::ColorType::GrayA(_) => {
+                pixels.extend_from_slice(&[chunk[0], chunk[0], chunk[0]]);
+            }
+            tiff::ColorType::RGB(_) | tiff::ColorType::RGBA(_) => {
+                pixels.extend_from_slice(&chunk[0..3]);
+            }
+            tiff::ColorType::CMYK(_) | tiff::ColorType::CMYKA(_) => {
+                pixels.extend_from_slice(&chunk[0..4]);
+            }
+            _ => {
+                return Err(ImposerError::Parse(
+                    "ColorType TIFF PSD non supporté".to_string(),
+                ));
+            }
+        }
+    }
+
+    let icc_profile = if is_cmyk {
+        let profile_bytes = icc_from_tiff
+            .or_else(|| extract_psd_embedded_profile(source_bytes))
+            .ok_or(ImposerError::NoProfile)?;
+        let _ = IccProfile::parse(&profile_bytes)?;
+        Some(profile_bytes)
+    } else {
+        // An ICC tag attached to an RGB TIFF is intentionally ignored:
+        // Imposer treats flattened PSDs coming back as RGB as DeviceRGB.
+        None
+    };
+
+    let width_pt = width_px as f32 / dpi.0 * 72.0;
+    let height_pt = height_px as f32 / dpi.1 * 72.0;
+    Ok(SourcePage {
+        width_pt,
+        height_pt,
+        kind: SourceKind::Raster {
+            pixels,
+            width_px,
+            height_px,
+            color_space: if is_cmyk {
+                ImageColorSpace::DeviceCmyk
+            } else {
+                ImageColorSpace::DeviceRgb
+            },
+            icc_profile,
+        },
+    })
 }

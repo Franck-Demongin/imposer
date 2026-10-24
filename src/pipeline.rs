@@ -47,6 +47,10 @@ impl PrintPipeline {
             .args([
                 target_input.clone(),
                 "-flatten".to_string(),
+                "-depth".to_string(),
+                "8".to_string(),
+                "-compress".to_string(),
+                "none".to_string(),
                 tiff_output.to_string(),
             ])
             .output();

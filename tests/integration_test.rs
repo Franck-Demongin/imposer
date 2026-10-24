@@ -240,6 +240,21 @@ fn psd_cmyk_without_profile_is_rejected() {
 }
 
 #[test]
+fn image_magick_psd_extraction_preserves_cmyk() {
+    use std::process::Command;
+
+    if Command::new("magick").arg("--version").output().is_err() {
+        return;
+    }
+
+    let profile = fs::read("assets/ISOcoated_v2_300_eci.icc").unwrap();
+    let psd = build_minimal_psd(8, 8, Some(&profile));
+    let sources = sources_from_bytes(&[psd]).unwrap();
+    assert_eq!(sources[0].color_kind(), SourceColorKind::Cmyk);
+    assert!(sources[0].color_label().contains("CMJN"));
+}
+
+#[test]
 fn generated_pdfx4_output_preflight_is_clean() {
     use imposer::config::{SheetOrientation, SheetSize};
     use imposer::{ImpositionConfig, generate, preflight_output, sources_from_bytes};
