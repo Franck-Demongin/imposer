@@ -4,3 +4,7 @@ Cargo.lock
 /data/
 /*.pdf
 /output/
+
+# Internal working directories
+/.qwen/
+/doc/
