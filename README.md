@@ -9,23 +9,36 @@ formats A4, A3 et SRA3.
 - Fond perdu ajustable, par défaut 2 mm.
 - Marge de sécurité non imprimable fixe, par défaut 5 mm.
 - Marques de coupe calculées à partir des bords de coupe uniques.
-- Conservation du profil colorimétrique (`OutputIntent`) et des ressources des sources PDF.
+- Conservation du profil colorimétrique (`OutputIntent`), des ressources des
+  sources PDF et du profil ICC des sources CMJN.
 - Recto/verso pour 1 ou 2 sources : pages d'un PDF ou plusieurs fichiers.
-- Entrées raster supportées : PNG, JPEG/JPG et PSD. Le PSD CMJN doté d'un profil
-  ICC intégré est converti en sRGB à partir de ce profil ; sinon le CMJN est
-  préservé.
+- Les sources d'une même imposition doivent avoir le même type de colorimétrie
+  (`RVB` ou `CMJN`) et des dimensions compatibles, à 0.5 pt près.
+- Entrées raster supportées : PNG, JPEG/JPG et PSD. Les PSD peuvent être RGB,
+  niveaux de gris ou CMJN ; un PSD CMJN doit contenir un profil ICC intégré. Si
+  ImageMagick est disponible, l'aplatissement conserve le mode CMJN et le
+  profil ICC. Les sources RVB restent en DeviceRGB.
+- Profil couleur détecté affiché lors de la génération (CLI et TUI).
 - Interface texte (TUI) accessible sans argument ni avec `--tui`.
 - CLI.
 
 ## Formats d'entrée
 
-- `PDF` : 1 ou 2 pages.
-- `PNG` et `JPEG/JPG` : conversion en RVB. Le DPI est lu s'il est présent,
-  sinon 300 DPI est utilisé.
-- `PSD` : RGB, niveaux de gris et CMJN supportés.
+- `PDF` : 1 ou 2 pages, avec conservation des ressources et, lorsque les sources
+  sont CMYK, des intentions de sortie compatibles.
+- `PNG` et `JPEG/JPG` : conversion en RVB ; les profils ICC sont ignorés
+  (DeviceRGB). Le DPI est lu s'il est présent, sinon 300 DPI est utilisé.
+- `PSD` : RGB, niveaux de gris ou CMJN supportés. Un PSD CMJN doit contenir un
+  profil ICC intégré ; sinon la source est refusée. La résolution est lue si elle
+  est intégrée, sinon 300 DPI est utilisée. Si ImageMagick est disponible, le PSD
+  est aplati sans conversion implicite en RGB.
+- Les profils CMJN PDF et PSD sont inspectés récursivement, y compris les
+  intentions de sortie ICC.
 
-Les dimensions d'entrée sont interprétées telles quelles, y compris le fond perdu déjà
-présent dans le document source.
+Toutes les données d'une même imposition doivent avoir les mêmes dimensions, à
+0,5 pt près, ainsi que la même nature colorimétrique. Les dimensions d'entrée
+sont interprétées telles quelles, y compris le fond perdu déjà présent dans le
+document source.
 
 ## Installation
 
@@ -38,6 +51,17 @@ l'installation :
 rustc --version
 cargo --version
 ```
+
+Pour la commande CLI/TUI qui écrit le PDF certifié, Ghostscript doit être
+installé et disponible (commande `gs` sous Linux/macOS, `gswin64c.exe` sous
+Windows).
+
+Pour traiter les PSD, ImageMagick est utilisé si la commande `magick` est
+disponible : l'aplatissement conserve alors le mode CMJN et le profil ICC.
+Sans ImageMagick, le décodeur PSD Rust est utilisé comme repli.
+
+Pour compiler avec la GUI Slint (`--features gui`), les bibliothèques
+Slint/Wayland sont également nécessaires sous Linux.
 
 ### Récupérer les sources
 
@@ -56,6 +80,19 @@ Le binaire est généré selon le système :
 
 - Linux et macOS : `target/release/imposer`
 - Windows : `target/release/imposer.exe`
+
+#### Installer depuis une release Git
+
+```sh
+cargo install --git https://github.com/Franck-Demongin/imposer.git --tag v0.5.0 --features gui
+```
+
+Cette installation produit `imposer` et `imposer-gui`. Si `~/.cargo/bin` n'est pas dans
+`PATH`, ajoutez-le puis rechargez la configuration du shell :
+
+```sh
+export PATH="$HOME/.cargo/bin:$PATH"
+```
 
 ### Lancer l'application
 
@@ -174,18 +211,26 @@ Options principales : `--sheet` (`a4`, `a3`, `sra3`), `--sheet-orientation`
 verso sheets, default false), `--bleed` (mm), `--safety-margin` (mm),
 `--no-rotate-copies`, `--tui`.
 
-Les applications CMYK conservent les profils ICC et les intentions de sortie ;
-les applications RVB sont écrites en DeviceRGB. La rotation des versos n'est
-appliquée que si `--rotate-verso` est demandé.
+Les sources CMYK conservent leur profil ICC et, si tous les profils sont
+compatibles, les métadonnées PDF/X-4. Les sources RVB sont écrites en
+DeviceRGB. Aucune conversion implicite entre les deux familles de couleur n'est
+effectuée. La rotation des versos n'est appliquée que si `--rotate-verso` est
+demandé.
 
 ## Tests
 
 ```sh
 cargo test
-cargo clippy
+cargo test --all-features
+cargo clippy --all-targets --all-features -- -D warnings
+cargo fmt --check
+cargo build --release --features slint-ui
 ```
 
-## Publication Windows
+## Publication
 
-La GitHub Action `.github/workflows/release.yml` compile et publie `imposer.exe`
-lors d'un push de tag `v*`.
+La GitHub Action `.github/workflows/release.yml` déclenche une publication lors d'un
+push de tag `v*`. Le premier job crée la release et ses notes à partir des commits
+depuis le tag précédent, puis publie sous Windows les binaires `imposer.exe` et
+`imposer-gui.exe`. Un second job Linux, qui dépend du premier, ajoute ensuite
+`imposer` et `imposer-gui` à la même release.
