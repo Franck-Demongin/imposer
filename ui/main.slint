@@ -68,11 +68,16 @@ export component AppWindow inherits Window {
     in property <float> preview-height: 0;
     in property <[PreviewPlacement]> preview-placements: [];
 
+    in property <string> last-output-path: "";
+    in property <bool> output-ready: false;
+
     callback browse-source-one();
     callback browse-source-two();
     callback remove-last-source();
     callback browse-output-directory();
     callback generate();
+    callback open-output-file();
+    callback open-output-folder();
     callback refresh-preview();
 
     VerticalLayout {
@@ -256,6 +261,25 @@ export component AppWindow inherits Window {
                 primary: true;
                 min-width: 160px;
                 clicked => { root.generate(); }
+            }
+        }
+
+        if root.output-ready: HorizontalLayout {
+            spacing: Theme.spacing-m;
+            padding-top: Theme.spacing-s;
+            alignment: end;
+
+            Button {
+                text: "Ouvrir le fichier";
+                enabled: !root.busy;
+                min-width: 150px;
+                clicked => { root.open-output-file(); }
+            }
+            Button {
+                text: "Ouvrir le dossier";
+                enabled: !root.busy;
+                min-width: 150px;
+                clicked => { root.open-output-folder(); }
             }
         }
 

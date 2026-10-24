@@ -1,4 +1,6 @@
 use crate::tui::run_imposition_work;
+
+type BusyReceiver = std::sync::mpsc::Receiver<(String, Option<std::path::PathBuf>)>;
 use imposer::compute_layout;
 use imposer::config::{ImpositionConfig, SheetOrientation, SheetSize};
 use imposer::{ImposerError, Result};
@@ -14,7 +16,7 @@ pub fn run() -> Result<()> {
     let ui = AppWindow::new().map_err(|e| ImposerError::Generation(e.to_string()))?;
     let weak_ui = ui.as_weak();
 
-    let busy_rx: Arc<Mutex<Option<std::sync::mpsc::Receiver<String>>>> = Arc::new(Mutex::new(None));
+    let busy_rx: Arc<Mutex<Option<BusyReceiver>>> = Arc::new(Mutex::new(None));
 
     let timer_weak = weak_ui.clone();
     let timer_rx = busy_rx.clone();
@@ -32,7 +34,7 @@ pub fn run() -> Result<()> {
                 Err(_) => return,
             };
             if let Some(rx) = guard.as_mut()
-                && let Ok(status) = rx.try_recv()
+                && let Ok((status, output_path)) = rx.try_recv()
             {
                 let level = if status.starts_with("Erreur") {
                     2
@@ -43,6 +45,10 @@ pub fn run() -> Result<()> {
                 };
                 ui.set_status(status.into());
                 ui.set_status_level(level);
+                if let Some(path) = output_path {
+                    ui.set_last_output_path(path.to_string_lossy().to_string().into());
+                    ui.set_output_ready(true);
+                }
                 ui.set_busy(false);
                 *guard = None;
             }
@@ -157,6 +163,8 @@ pub fn run() -> Result<()> {
                 return;
             }
 
+            ui.set_output_ready(false);
+
             let mut source_paths = Vec::new();
             if !ui.get_source_1().to_string().trim().is_empty() {
                 source_paths.push(PathBuf::from(ui.get_source_1().to_string()));
@@ -223,6 +231,7 @@ pub fn run() -> Result<()> {
 
             let (tx, rx) = std::sync::mpsc::channel();
             let thread_paths = source_paths.clone();
+            let thread_destination = destination.clone();
             std::thread::spawn(move || {
                 let status = run_imposition_work(
                     thread_paths,
@@ -234,12 +243,44 @@ pub fn run() -> Result<()> {
                     safety,
                     rotate,
                 );
-                let _ = tx.send(status);
+                let output_path = if status.starts_with("PDF généré") {
+                    Some(thread_destination)
+                } else {
+                    None
+                };
+                let _ = tx.send((status, output_path));
             });
 
             *rx_state.lock().unwrap() = Some(rx);
             ui.set_busy(true);
             ui.set_status("Exécution en cours...".into());
+        });
+    }
+
+    {
+        let weak = weak_ui.clone();
+        ui.on_open_output_file(move || {
+            if let Some(ui) = weak.upgrade() {
+                let path = ui.get_last_output_path().to_string();
+                if !path.trim().is_empty() {
+                    let _ = imposer::open::open_path(std::path::Path::new(&path));
+                }
+            }
+        });
+    }
+
+    {
+        let weak = weak_ui.clone();
+        ui.on_open_output_folder(move || {
+            if let Some(ui) = weak.upgrade() {
+                let path = ui.get_last_output_path().to_string();
+                if !path.trim().is_empty() {
+                    let folder = std::path::Path::new(&path)
+                        .parent()
+                        .unwrap_or_else(|| std::path::Path::new("."));
+                    let _ = imposer::open::open_path(folder);
+                }
+            }
         });
     }
 

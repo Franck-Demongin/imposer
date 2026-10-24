@@ -8,6 +8,7 @@ pub mod icc;
 pub mod import;
 pub mod layout;
 pub mod numfmt;
+pub mod open;
 pub mod output;
 pub mod pdf;
 pub mod pipeline;
