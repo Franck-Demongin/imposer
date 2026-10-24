@@ -285,6 +285,57 @@ fn jpeg_dpi(bytes: &[u8]) -> Option<(f32, f32)> {
 
 // ---------- PSD ----------
 fn parse_psd(bytes: &[u8]) -> Result<SourcePage> {
+    // Etape normale: extraire le composite aplati avec ImageMagick en TIFF.
+    // Si l'outil est indisponible ou l'extraction echoue, revenir au decodeur
+    // Rust deja existant.
+    let dpi = extract_psd_resolution(bytes).unwrap_or((300.0, 300.0));
+    let id = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let temp_dir = std::env::temp_dir();
+    let psd_input = temp_dir.join(format!("imposer-psd-{}.psd", id));
+    let tiff_output = temp_dir.join(format!("imposer-psd-{}.tiff", id));
+
+    if let Ok(()) = std::fs::write(&psd_input, bytes)
+        && let Ok(pipeline) = crate::pipeline::PrintPipeline::new()
+    {
+        if pipeline
+            .pre_process_psd(
+                psd_input.to_string_lossy().as_ref(),
+                tiff_output.to_string_lossy().as_ref(),
+            )
+            .is_ok()
+        {
+            // Load the flattened TIFF. The final ICC/CMYK certification is
+            // performed later by Ghostscript, so this stays RGB.
+            let loaded = image::open(&tiff_output)
+                .ok()
+                .map(|img| (img.width(), img.height(), img.to_rgb8()));
+            let _ = std::fs::remove_file(&psd_input);
+            let _ = std::fs::remove_file(&tiff_output);
+            if let Some((w, h, rgb)) = loaded
+                && rgb.len() == (w * h * 3) as usize
+            {
+                let width_pt = w as f32 / dpi.0 * 72.0;
+                let height_pt = h as f32 / dpi.1 * 72.0;
+                return Ok(SourcePage {
+                    width_pt,
+                    height_pt,
+                    kind: SourceKind::Raster {
+                        pixels: rgb.into_raw(),
+                        width_px: w,
+                        height_px: h,
+                        color_space: ImageColorSpace::DeviceRgb,
+                        icc_profile: None,
+                    },
+                });
+            }
+        }
+        let _ = std::fs::remove_file(&psd_input);
+        let _ = std::fs::remove_file(&tiff_output);
+    }
+
     let cmyk_mode = psd_color_mode(bytes) == Some(4);
     match parse_psd_zune(bytes) {
         Ok(s) => Ok(s),

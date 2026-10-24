@@ -239,6 +239,51 @@ fn psd_cmyk_without_profile_is_rejected() {
     assert!(res.is_err(), "{:?}", res.err());
 }
 
+#[test]
+fn generated_pdfx4_output_preflight_is_clean() {
+    use imposer::config::{SheetOrientation, SheetSize};
+    use imposer::{ImpositionConfig, generate, preflight_output, sources_from_bytes};
+
+    let gs = if cfg!(target_os = "windows") {
+        "gswin64c.exe"
+    } else {
+        "gs"
+    };
+    if std::process::Command::new(gs)
+        .arg("--version")
+        .output()
+        .is_err()
+    {
+        return;
+    }
+
+    let input = load("sample_1page.pdf");
+    let sources = sources_from_bytes(&[input]).unwrap();
+    let cfg = ImpositionConfig {
+        sheet_size: SheetSize::A4,
+        sheet_orientation: SheetOrientation::Auto,
+        bleed_mm: 2.0,
+        safety_margin_mm: 5.0,
+        rotate_verso: true,
+        rotate_copies: true,
+    };
+
+    let output = std::env::temp_dir().join("imposer_generated_pdfx4_regression.pdf");
+    let report = generate(&sources, &cfg, output.clone()).unwrap();
+    assert_eq!(report.output_path, output);
+    assert!(report.output_size > 0);
+
+    let data = std::fs::read(&output).unwrap();
+    let preflight = preflight_output(&data);
+    assert!(preflight.errors.is_empty(), "{:?}", preflight.errors);
+    assert!(preflight.warnings.is_empty(), "{:?}", preflight.warnings);
+
+    let doc = Document::load_mem(&data).unwrap();
+    assert_eq!(doc.get_pages().len(), 1);
+
+    let _ = std::fs::remove_file(&output);
+}
+
 fn output_intents_count(doc: &Document) -> usize {
     let cat_id = match doc.trailer.get(b"Root") {
         Ok(lopdf::Object::Reference(id)) => *id,

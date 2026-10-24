@@ -10,6 +10,7 @@ pub mod layout;
 pub mod numfmt;
 pub mod output;
 pub mod pdf;
+pub mod pipeline;
 pub mod preflight;
 pub mod profile;
 pub mod source;

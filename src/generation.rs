@@ -98,16 +98,31 @@ pub fn generate(
     options.validate()?;
 
     let profiles: Vec<String> = sources.iter().map(SourcePage::color_label).collect();
-    let bytes = impose_sources(sources, options)?;
 
-    // Écriture dans un temporaire adjacent puis renommage si nécessaire n'est
-    // pas requis pour la v1 : la simplicité prime et les erreurs d'E/S sont
-    // déjà remontées.
-    fs::write(&output_path, &bytes)?;
+    // 1. Générer d'abord le PDF hybride lopdf dans un fichier temporaire.
+    let hybrid_bytes = impose_sources(sources, options)?;
+    let hybrid_dir = std::env::temp_dir();
+    let hybrid_id = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let hybrid_path = hybrid_dir.join(format!("imposer-hybrid-{}.pdf", hybrid_id));
+    fs::write(&hybrid_path, &hybrid_bytes)?;
+
+    // 2. Certifier le PDF hybride en PDF/X-4 avec Ghostscript.
+    let pipeline = crate::pipeline::PrintPipeline::new().map_err(ImposerError::Io)?;
+    pipeline.finalize_pdf_x(
+        hybrid_path.to_string_lossy().as_ref(),
+        output_path.to_string_lossy().as_ref(),
+    )?;
+
+    let _ = fs::remove_file(&hybrid_path);
+
+    let output_size = fs::metadata(&output_path).map_err(ImposerError::Io)?.len() as usize;
 
     Ok(GenerateReport {
         output_path,
-        output_size: bytes.len(),
+        output_size,
         profiles,
     })
 }

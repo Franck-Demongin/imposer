@@ -17,6 +17,10 @@ pub enum ImposerError {
     Generation(String),
     #[error("marge de feuille insuffisante pour les traits de coupe : {0}")]
     CropMarksMargin(String),
+    #[error("dépendance système manquante : {0}")]
+    MissingDependency(String),
+    #[error("erreur de pipeline externe : {0}")]
+    Pipeline(String),
     #[error("erreur d'entrée/sortie : {0}")]
     Io(#[from] std::io::Error),
     #[error("conflit de couleur des sources : {0}")]

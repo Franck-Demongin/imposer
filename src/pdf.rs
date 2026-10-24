@@ -125,8 +125,69 @@ pub fn impose_sources(sources: &[SourcePage], config: &ImpositionConfig) -> Resu
 
         let mut xobjects = Dictionary::new();
         xobjects.set(b"Page0".to_vec(), Object::Reference(xobj_id));
+
+        let mut ext_gstates = Dictionary::new();
+        let mut overprint_gs = Dictionary::new();
+        overprint_gs.set("Type", Object::Name(b"ExtGState".to_vec()));
+        overprint_gs.set("OP", Object::Boolean(true));
+        overprint_gs.set("op", Object::Boolean(true));
+        overprint_gs.set("OPM", Object::Integer(1));
+        let overprint_id = output.add_object(overprint_gs);
+        ext_gstates.set(b"RegGS".to_vec(), Object::Reference(overprint_id));
+
+        let separation = Object::Array(vec![
+            Object::Name(b"Separation".to_vec()),
+            Object::Name(b"All".to_vec()),
+            Object::Name(b"DeviceCMYK".to_vec()),
+            Object::Dictionary({
+                let mut function = Dictionary::new();
+                function.set("FunctionType", Object::Integer(2));
+                function.set(
+                    "Domain",
+                    Object::Array(vec![Object::Real(0.0), Object::Real(1.0)]),
+                );
+                function.set(
+                    "Range",
+                    Object::Array(vec![
+                        Object::Real(0.0),
+                        Object::Real(1.0),
+                        Object::Real(0.0),
+                        Object::Real(1.0),
+                        Object::Real(0.0),
+                        Object::Real(1.0),
+                        Object::Real(0.0),
+                        Object::Real(1.0),
+                    ]),
+                );
+                function.set(
+                    "C0",
+                    Object::Array(vec![
+                        Object::Real(0.0),
+                        Object::Real(0.0),
+                        Object::Real(0.0),
+                        Object::Real(0.0),
+                    ]),
+                );
+                function.set(
+                    "C1",
+                    Object::Array(vec![
+                        Object::Real(1.0),
+                        Object::Real(1.0),
+                        Object::Real(1.0),
+                        Object::Real(1.0),
+                    ]),
+                );
+                function.set("N", Object::Integer(1));
+                function
+            }),
+        ]);
+        let mut color_spaces = Dictionary::new();
+        color_spaces.set(b"Reg".to_vec(), separation);
+
         let mut resources = Dictionary::new();
         resources.set(b"XObject".to_vec(), Object::Dictionary(xobjects));
+        resources.set(b"ExtGState".to_vec(), Object::Dictionary(ext_gstates));
+        resources.set(b"ColorSpace".to_vec(), Object::Dictionary(color_spaces));
 
         let verso_rotated = is_verso && config.rotate_verso;
         let content_data = build_face_content(&plan, is_verso, verso_rotated)?;
@@ -535,16 +596,10 @@ pub fn draw_crop_marks(ops: &mut Vec<Operation>, plan: &LayoutPlan) -> Result<()
     }
 
     ops.push(Operation::new("q", vec![]));
+    ops.push(Operation::new("gs", vec![Object::Name(b"RegGS".to_vec())]));
     ops.push(Operation::new("w", vec![0.25_f32.into()]));
-    ops.push(Operation::new(
-        "K",
-        vec![
-            1.0_f32.into(),
-            1.0_f32.into(),
-            1.0_f32.into(),
-            1.0_f32.into(),
-        ],
-    ));
+    ops.push(Operation::new("CS", vec![Object::Name(b"Reg".to_vec())]));
+    ops.push(Operation::new("SC", vec![1.0_f32.into()]));
 
     for x in &xs {
         // top
