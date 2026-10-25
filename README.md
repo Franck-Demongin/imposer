@@ -84,7 +84,7 @@ Le binaire est généré selon le système :
 #### Installer depuis une release Git
 
 ```sh
-cargo install --git https://github.com/Franck-Demongin/imposer.git --tag v0.8.1 --features gui
+cargo install --git https://github.com/Franck-Demongin/imposer.git --tag v0.8.2 --features gui
 ```
 
 Cette installation produit `imposer` et `imposer-gui`. Si `~/.cargo/bin` n'est pas dans
