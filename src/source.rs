@@ -346,7 +346,7 @@ fn parse_psd_zune(bytes: &[u8]) -> Result<SourcePage> {
     let raw = if decoder.bit_depth() == Some(zune_psd::zune_core::bit_depth::BitDepth::Sixteen) {
         // Downconvert 16-bit to 8-bit without treating planar data as RGBA.
         // Each plane is laid out contiguously and header channel counts apply.
-        raw.as_chunks::<2>().0.iter().map(|b| b[0]).collect()
+        raw.chunks_exact(2).map(|chunk| chunk[0]).collect()
     } else {
         raw
     };
