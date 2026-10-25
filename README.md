@@ -43,6 +43,8 @@ une interface texte interactive et une interface graphique Slint optionnelle.
 - Classification ICC entre RVB et CMJN pour les sources PDF et PSD.
 - Affichage du profil couleur détecté pendant la génération.
 - Pas de dépendance directe à ImageMagick à l'exécution.
+- Ghostscript est nécessaire à l'exécution pour les sources RVB (PNG, JPEG/JPG)
+  et le repli PDF/X ; les sources CMJN compatibles sont émises en natif.
 - TUI et GUI Slint optionnelle avec thème système et génération en arrière-plan.
 
 ## Binaires inclus
@@ -59,9 +61,20 @@ artefacts de publication sont `imposer.exe`, `imposer-gui.exe`, `imposer` et
 
 ## Installation
 
-Rust 1.85 ou supérieur est nécessaire ; Rust 1.85 étant la version minimale compatible avec l'édition 2024 déclarée dans `Cargo.toml`.
+Rust 1.85 est la borne basse déclarée par `rust-version` dans `Cargo.toml`
+pour l'édition 2024. Les dépendances, notamment Slint, peuvent exiger une
+version plus récente; sinon, utilisez la dernière version stable.
 
-### Dépendances système Linux
+### Dépendances d'exécution
+
+Ghostscript est requis à l'exécution pour générer des sources RVB (PNG, JPEG/JPG)
+et tous les replis. Les sources CMJN compatibles sont émises en natif.
+
+- Linux : `sudo apt-get install -y ghostscript` (commande `gs`)
+- macOS : utilisez la commande `gs` (par exemple après `brew install ghostscript`)
+- Windows : installez Ghostscript et placez `gswin64c.exe` dans `PATH`
+
+### Dépendances de compilation Linux (GUI)
 
 Pour compiler la GUI sous Linux, y compris via `cargo install --locked --features gui` :
 
@@ -71,13 +84,12 @@ sudo apt-get install -y \
   libfreetype6-dev \
   libx11-dev \
   libxkbcommon-dev \
-  libwayland-dev \
-  ghostscript
+  libwayland-dev
 ```
 
 ### Prérequis Windows
 
-Ghostscript doit être installé pour générer des sources RVB ; `gswin64c.exe` doit être disponible dans `PATH`. Les sources CMYK compatibles sont émises en natif, sans Ghostscript.
+Ghostscript doit être installé pour générer des sources RVB ; `gswin64c.exe` doit être disponible dans `PATH`. Les sources CMJN compatibles sont émises en natif, sans Ghostscript.
 
 ### Télécharger une version
 
@@ -85,12 +97,12 @@ Récupérez l'exécutable correspondant au système depuis la page Release de Gi
 sous Windows, `imposer.exe` et `imposer-gui.exe`; sous Linux, `imposer` et
 `imposer-gui`.
 
-Les binaires Linux téléchargés doivent être exécutables et peuvent utiliser
-l'intégration bureau livrée avec le dépôt :
+Les binaires Linux téléchargés peuvent utiliser l'intégration bureau livrée avec
+le dépôt, depuis un clone du dépôt :
 
 ```sh
 chmod +x imposer-gui
-./packaging/linux/install-local.sh ~/Téléchargements/imposer-gui
+./packaging/linux/install-local.sh "$HOME/Downloads/imposer-gui"
 ```
 
 Les binaires Linux sont compilés sur une version récente d'Ubuntu ; une distribution plus ancienne peut être incompatible avec leur version de `glibc`.
@@ -98,7 +110,7 @@ Les binaires Linux sont compilés sur une version récente d'Ubuntu ; une distri
 Exécution directe :
 
 ```sh
-# Linux / macOS
+# Linux
 ./imposer
 ```
 
@@ -112,6 +124,9 @@ Exécution directe :
 ```sh
 cargo install --locked --git https://github.com/Franck-Demongin/Imposer.git --branch master --features gui
 ```
+
+Cette commande installe le dernier état de la branche `master`. Pour une version
+précise, ajoutez `--tag vX.Y.Z`.
 
 Les commandes sont installées dans `$HOME/.cargo/bin`. Si ce répertoire n'est
 pas dans `PATH`, ajoutez-le dans votre profil ou la session active, puis relancez
@@ -315,7 +330,7 @@ TOML devienne inutilisable à cause de valeurs incorrectes.
   repli pour RVB, les profils incompatibles et les cas non supportés.
 - Ghostscript est requis pour les sources RVB, y compris PNG, JPEG/JPG ; sans
   lui, ces générations échouent avec `Ghostscript introuvable`. Les sources
-  CMYK compatibles sont émises en natif sans Ghostscript.
+  CMJN compatibles sont émises en natif sans Ghostscript.
 - Aucune conversion implicite n'existe entre RVB et CMJN.
 
 La ligne de commande affiche le profil couleur détecté pour chaque source avant
@@ -363,7 +378,7 @@ nécessiter une nouvelle session avant d'afficher le lanceur fraîchement instal
 
 - L'icône est intégrée avec `winresource` pendant la compilation.
 - La génération de sources RVB requiert Ghostscript (`gswin64c.exe`) dans PATH ;
-  les sources CMYK compatibles sont émises en natif.
+  les sources CMJN compatibles sont émises en natif.
 - Le paramètre `windows_subsystem = "windows"` évite l'ouverture d'une console.
 
 ## Icônes et ressources
@@ -414,6 +429,10 @@ et la cohérence du fichier `.desktop` vis-à-vis de `io.github.Franck-Demongin.
 ## Structure du dépôt
 
 ```text
+Cargo.toml                  Manifeste et dépendances
+Cargo.lock                  Verrou exact des dépendances
+LICENSE                     Licence MIT
+QWEN.md                     Contexte interne pour l'assistant de code
 src/main.rs                 Point d'entrée CLI/TUI
 src/gui_main.rs             Point d'entrée GUI Slint
 src/lib.rs                  Bibliothèque partagée et API publique
@@ -429,7 +448,7 @@ src/icc.rs                  Gestion des profils ICC
 build.rs                    Compilation Slint et icône Windows
 packaging/linux/            Intégration bureau Linux
 assets/icons/               Icônes et script de génération
-examples/                  Exemples et générateur de données
+examples/                    Exemples et générateur de données
 .github/workflows/         CI et publication
 tests/                      Tests unitaires et d'intégration
 ```
@@ -442,7 +461,11 @@ changements d'interface, conservez le thème système et laissez l'identifiant
 application correspondre à `io.github.Franck-Demongin.Imposer`.
 
 Pour les changements concernant les couleurs ou les formats de feuille, décrivez
-la couverture de tests de non-régression attendue dans la pull request. Ne pas déplacer `APP_ID` ni modifier l'ordre d'appel dans `src/slint_ui.rs`, validé par la CI.
+la couverture de tests de non-régression attendue dans la pull request.
+
+Règle `APP_ID` : conservez l'emplacement de `APP_ID` dans `src/slint_ui.rs` et
+l'ordre des appels `AppWindow::new()` puis `slint::set_xdg_app_id(...)`.
+Sans ce réglage, l'icône n'est plus appliquée correctement sous GNOME/Wayland.
 
 ## Licence
 

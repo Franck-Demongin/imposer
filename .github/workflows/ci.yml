@@ -52,7 +52,8 @@ jobs:
             assets/icons/ui/delete.svg \
             assets/icons/ui/document-save.svg \
             packaging/linux/install-local.sh \
-            packaging/linux/uninstall-local.sh
+            packaging/linux/uninstall-local.sh \
+            LICENSE
           do
             test -f "$f" || fail "missing $f"
           done
