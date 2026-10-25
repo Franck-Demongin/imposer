@@ -147,16 +147,16 @@ export component AppWindow inherits Window {
 
                             Text { text: "Recto"; row: 0; col: 0; vertical-alignment: center; }
                             LineEdit { text: root.source-1; read-only: true; row: 0; col: 1; horizontal-stretch: 1; }
-                            Button { text: "Parcourir…"; enabled: !root.busy; row: 0; col: 2; min-width: 100px; clicked => { root.browse-source-one(); } }
+                            Button { text: "Parcourir…"; icon: @image-url("../assets/icons/ui/file-open.svg"); icon-size: 16px; colorize-icon: true; enabled: !root.busy; row: 0; col: 2; min-width: 100px; clicked => { root.browse-source-one(); } }
 
                             Text { text: "Verso"; row: 1; col: 0; vertical-alignment: center; }
                             LineEdit { text: root.source-2; read-only: true; row: 1; col: 1; horizontal-stretch: 1; }
-                            Button { text: "Parcourir…"; enabled: !root.busy; row: 1; col: 2; min-width: 100px; clicked => { root.browse-source-two(); } }
+                            Button { text: "Parcourir…"; icon: @image-url("../assets/icons/ui/file-open.svg"); icon-size: 16px; colorize-icon: true; enabled: !root.busy; row: 1; col: 2; min-width: 100px; clicked => { root.browse-source-two(); } }
                         }
                         HorizontalLayout {
                             alignment: end;
                             spacing: Theme.spacing-s;
-                            Button { text: "Retirer la dernière"; enabled: !root.busy; clicked => { root.remove-last-source(); } }
+                            Button { text: "Retirer la dernière"; icon: @image-url("../assets/icons/ui/delete.svg"); icon-size: 16px; colorize-icon: true; enabled: !root.busy; clicked => { root.remove-last-source(); } }
                         }
                     }
 
@@ -168,7 +168,7 @@ export component AppWindow inherits Window {
 
                             Text { text: "Dossier"; row: 0; col: 0; vertical-alignment: center; }
                             LineEdit { text <=> root.output-dir; row: 0; col: 1; horizontal-stretch: 1; }
-                            Button { text: "Dossier…"; enabled: !root.busy; row: 0; col: 2; min-width: 100px; clicked => { root.browse-output-directory(); } }
+                            Button { text: "Dossier…"; icon: @image-url("../assets/icons/ui/folder-open.svg"); icon-size: 16px; colorize-icon: true; enabled: !root.busy; row: 0; col: 2; min-width: 100px; clicked => { root.browse-output-directory(); } }
 
                             Text { text: "Fichier"; row: 1; col: 0; vertical-alignment: center; }
                             LineEdit { text <=> root.output-name; row: 1; col: 1; horizontal-stretch: 1; }
@@ -192,13 +192,19 @@ export component AppWindow inherits Window {
                                     horizontal-stretch: 1;
                                 }
                                 if root.sheet-save-visible: Button {
-                                    text: "@";
+                                    text: "";
+                                    icon: @image-url("../assets/icons/ui/document-save.svg");
+                                    icon-size: 16px;
+                                    colorize-icon: true;
                                     enabled: !root.busy;
                                     min-width: 30px; min-height: 30px;
                                     clicked => { root.save-preset-requested(); }
                                 }
                                 if root.sheet-delete-visible: Button {
-                                    text: "X";
+                                    text: "";
+                                    icon: @image-url("../assets/icons/ui/delete.svg");
+                                    icon-size: 16px;
+                                    colorize-icon: true;
                                     enabled: !root.busy;
                                     min-width: 30px; min-height: 30px;
                                     clicked => { root.delete-preset-requested(); }
@@ -475,12 +481,18 @@ export component AppWindow inherits Window {
 
             Button {
                 text: "Ouvrir le fichier";
+                icon: @image-url("../assets/icons/ui/file-open.svg");
+                icon-size: 16px;
+                colorize-icon: true;
                 enabled: !root.busy;
                 min-width: 150px;
                 clicked => { root.open-output-file(); }
             }
             Button {
                 text: "Ouvrir le dossier";
+                icon: @image-url("../assets/icons/ui/folder-open.svg");
+                icon-size: 16px;
+                colorize-icon: true;
                 enabled: !root.busy;
                 min-width: 150px;
                 clicked => { root.open-output-folder(); }
