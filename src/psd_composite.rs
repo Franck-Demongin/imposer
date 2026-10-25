@@ -488,9 +488,16 @@ pub fn parse_psd_composite(bytes: &[u8]) -> Result<source::SourcePage> {
         SupportedMode::Cmyk => ImageColorSpace::DeviceCmyk,
     };
     let icc_profile = if matches!(mode, SupportedMode::Cmyk) {
-        let profile = source::extract_psd_embedded_profile(bytes).ok_or(ImposerError::NoProfile)?;
-        let _ = IccProfile::parse(&profile).map_err(|e| ImposerError::InvalidIcc(e.to_string()))?;
-        Some(profile)
+        match source::extract_psd_embedded_profile(bytes) {
+            Some(profile) => {
+                IccProfile::parse(&profile).map_err(|e| ImposerError::InvalidIcc(e.to_string()))?;
+                Some(profile)
+            }
+            // A generator that cannot apply its ICC profile may leave this
+            // optional embedded resource absent. Pixel decoding still succeeds;
+            // source::parse_psd enforces the policy requirement afterwards.
+            None => None,
+        }
     } else {
         None
     };

@@ -288,7 +288,14 @@ fn parse_psd(bytes: &[u8]) -> Result<SourcePage> {
     // Le décodeur interne lit directement l'Image Data PSD, préservant le
     // comportement composite observé sans appeler ImageMagick.
     match crate::psd_composite::parse_psd_composite(bytes) {
-        Ok(source) => return Ok(source),
+        Ok(source) => {
+            // The composite decoder may succeed without an embedded ICC
+            // resource; Imposer still rejects CMYK PSD sources lacking one.
+            if source.color_kind() == SourceColorKind::Cmyk && source.cmyk_profile().is_none() {
+                return Err(ImposerError::NoProfile);
+            }
+            return Ok(source);
+        }
         Err(e @ ImposerError::NoProfile)
         | Err(e @ ImposerError::InvalidIcc(_))
         | Err(e @ ImposerError::AmbiguousProfile) => return Err(e),
