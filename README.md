@@ -1,254 +1,412 @@
 # Imposer
 
-Application Rust d'imposition de documents (PDF, PNG, JPEG, PSD) sur des planches aux
-formats A4, A3 et SRA3.
+[![CI](https://github.com/Franck-Demongin/Imposer/actions/workflows/ci.yml/badge.svg)](https://github.com/Franck-Demongin/Imposer/actions/workflows/ci.yml)
+[![Publication](https://img.shields.io/github/v/release/Franck-Demongin/Imposer)](https://github.com/Franck-Demongin/Imposer/releases)
+[![Licence MIT](https://img.shields.io/badge/Licence-MIT-blue.svg)](Cargo.toml)
+
+Imposer est une application Rust pour imposer des pages PDF, PNG, JPEG/JPG et PSD
+sur des planches A4, A3 et SRA3. Elle fournit un outil en ligne de commande,
+une interface texte interactive et une interface graphique Slint optionnelle.
+
+## Sommaire
+
+- [Fonctionnalités](#fonctionnalités)
+- [Binaires inclus](#binaires-inclus)
+- [Installation](#installation)
+- [Démarrage rapide](#démarrage-rapide)
+- [Entrées et compatibilité](#entrées-et-compatibilité)
+- [Processus d'imposition](#processus-dimposition)
+- [Référence de ligne de commande](#référence-de-ligne-de-commande)
+- [Interface texte (TUI)](#interface-texte-tui)
+- [Interface graphique (Slint)](#interface-graphique-slint)
+- [Formats de feuille et préréglés](#formats-de-feuille-et-préréglés)
+- [Profils couleur et PDF/X-4](#profils-couleur-et-pdfx-4)
+- [Sortie et repères de coupe](#sortie-et-repères-de-coupe)
+- [Intégration Linux](#intégration-linux)
+- [Intégration Windows](#intégration-windows)
+- [Icônes et ressources](#icônes-et-ressources)
+- [Développement](#développement)
+- [CI et publications](#ci-et-publications)
+- [Structure du dépôt](#structure-du-dépôt)
+- [Contribuer](#contribuer)
+- [Licence](#licence)
 
 ## Fonctionnalités
 
-- Imposition automatique la plus dense, avec rotation individuelle optionnelle.
-- Fond perdu ajustable, par défaut 2 mm.
-- Marge de sécurité non imprimable fixe, par défaut 5 mm.
-- Marques de coupe calculées à partir des bords de coupe uniques.
-- Conservation du profil colorimétrique (`OutputIntent`), des ressources des
-  sources PDF et du profil ICC des sources CMJN.
-- Recto/verso pour 1 ou 2 sources : pages d'un PDF ou plusieurs fichiers.
-- Les sources d'une même imposition doivent avoir le même type de colorimétrie
-  (`RVB` ou `CMJN`) et des dimensions compatibles, à 0.5 pt près.
-- Entrées raster supportées : PNG, JPEG/JPG et PSD. Les PSD peuvent être RGB,
-  niveaux de gris ou CMJN ; un PSD CMJN doit contenir un profil ICC intégré. Le
-  décodeur Rust lit le composite et préserve le type de colorimétrie et le profil
-  ICC. Les sources RVB restent en DeviceRGB.
-- Profil couleur détecté affiché lors de la génération (CLI et TUI).
-- Interface texte (TUI) accessible sans argument ni avec `--tui`.
-- CLI.
+- Imposition la plus dense, avec rotation individuelle optionnelle des copies.
+- Fond perdu et marge de sécurité non imprimable configurables.
+- Repères de coupe calculés à partir des arêtes de découpe uniques.
+- Conservation des ressources PDF et des profils CMJN compatibles lors de
+  l'émission.
+- Recto et verso à partir d'un PDF de une ou deux pages, ou de deux fichiers.
+- Entrées RVB, PNG, JPEG et PSD, avec décodage Rust natif pour les PSD.
+- Classification ICC entre RVB et CMJN pour les sources PDF et PSD.
+- Affichage du profil couleur détecté pendant la génération.
+- Pas de dépendance directe à ImageMagick à l'exécution.
+- TUI et GUI Slint optionnelle avec thème système et génération en arrière-plan.
 
-## Formats d'entrée
+## Binaires inclus
 
-- `PDF` : 1 ou 2 pages, avec conservation des ressources et, lorsque les sources
-  sont CMYK, des intentions de sortie compatibles.
-- `PNG` et `JPEG/JPG` : conversion en RVB ; les profils ICC sont ignorés
-  (DeviceRGB). Le DPI est lu s'il est présent, sinon 300 DPI est utilisé.
-- `PSD` : RGB, niveaux de gris ou CMJN supportés. Un PSD CMJN doit contenir un
-  profil ICC intégré ; sinon la source est refusée. La résolution est lue si elle
-  est intégrée, sinon 300 DPI est utilisée. Le composite et le profil ICC
-  sont lus directement par le décodeur Rust, sans dépendance à ImageMagick.
-- Les profils CMJN PDF et PSD sont inspectés récursivement, y compris les
-  intentions de sortie ICC.
+| Binaire | Contenu | Compilation |
+| --- | --- | --- |
+| `imposer` | CLI et TUI | `cargo build --release` |
+| `imposer-gui` | Interface graphique Slint | `cargo build --release --features gui` |
 
-Toutes les données d'une même imposition doivent avoir les mêmes dimensions, à
-0,5 pt près, ainsi que la même nature colorimétrique. Les dimensions d'entrée
-sont interprétées telles quelles, y compris le fond perdu déjà présent dans le
-document source.
+La feature `gui` est un alias de `slint-ui`. Une commande limitée à
+`--features gui --bin imposer-gui` évite de compiler le binaire CLI. Les
+artefacts de publication sont `imposer.exe`, `imposer-gui.exe`, `imposer` et
+`imposer-gui`.
 
 ## Installation
 
-### Prérequis
+### Télécharger une version
 
-Installez Rust via [rustup](https://rustup.rs/) si nécessaire, puis vérifiez
-l'installation :
+Récupérez l'exécutable correspondant au système depuis la page Release de GitHub :
+sous Windows, `imposer.exe` et `imposer-gui.exe`; sous Linux, `imposer` et
+`imposer-gui`.
 
-```sh
-rustc --version
-cargo --version
-```
-
-Pour la commande CLI/TUI qui écrit le PDF certifié, l'émission PDF/X-4 est
-native pour les sources CMJN ayant un profil ICC compatible ; dans ce cas,
-Ghostscript n'est pas nécessaire à l'exécution. Ghostscript reste utilisé
-comme solution de repli pour les sources RVB, les profils ICC incompatibles
-ou non supportés, les formats non gérés par le moteur natif et les défaillances
-de la génération native. Le décodeur Rust lit directement le composite des PSD
-; aucune commande `magick` n'est nécessaire.
-
-Pour compiler avec la GUI Slint (`--features gui`), les bibliothèques
-Slint/Wayland sont également nécessaires sous Linux.
-
-### Récupérer les sources
+Exécution directe :
 
 ```sh
-git clone https://github.com/Franck-Demongin/imposer.git
-cd imposer
+# Linux / macOS
+./imposer
 ```
 
-### Compiler
+```powershell
+# Windows PowerShell
+.\imposer.exe
+```
+
+### Installer avec Cargo
 
 ```sh
-cargo build --release
+cargo install --git https://github.com/Franck-Demongin/Imposer.git --tag v0.8.2 --features gui
 ```
 
-Le binaire est généré selon le système :
-
-- Linux et macOS : `target/release/imposer`
-- Windows : `target/release/imposer.exe`
-
-#### Installer depuis une release Git
-
-```sh
-cargo install --git https://github.com/Franck-Demongin/imposer.git --tag v0.8.2 --features gui
-```
-
-Cette installation produit `imposer` et `imposer-gui`. Si `~/.cargo/bin` n'est pas dans
-`PATH`, ajoutez-le puis rechargez la configuration du shell :
+Les commandes sont installées dans `$HOME/.cargo/bin`. Sur cette configuration,
+ce répertoire peut nécessiter d'être ajouté temporairement :
 
 ```sh
 export PATH="$HOME/.cargo/bin:$PATH"
 ```
 
-### Lancer l'application
-
-- Linux et macOS :
-  ```sh
-  ./target/release/imposer --tui
-  ```
-- Windows (PowerShell) :
-  ```powershell
-  .\target\release\imposer.exe --tui
-  ```
-
-Sans argument ni chemin de sortie, l'application ouvre aussi directement la TUI.
-
-## Interface texte (TUI)
-
-![Capture de l'interface TUI](assets/screen_tui.png)
+### Compiler depuis les sources
 
 ```sh
-./target/release/imposer --tui
-```
-
-Sans argument ni chemin de sortie, l'application ouvre aussi la TUI :
-
-```sh
-./target/release/imposer
-```
-
-La TUI permet de parcourir les fichiers `pdf`, `png`, `jpg`, `jpeg` et `psd`,
-d'ajouter jusqu'à deux sources dans l'ordre de sélection avec le fichier par
-défaut comme recto, de retirer la dernière source avec `Suppr`, et d'ajuster les
-options avant l'exécution. Un seul PDF peut fournir ses deux pages ; avec
-plusieurs sources, seule la première page de chaque PDF est utilisée.
-
-La liste des formats contient les tailles intégrées (`A4`, `A3`, `SRA3`),
-verrouillées, puis l'entrée `Personnalisé`. Choisir cette entrée ouvre une
-pop-up pour saisir la largeur et la hauteur en millimètres ; les flèches
-`Tab`, `Left`, `Right`, `Home` et `End` et `Enter` permettent d'éditer et de
-valider, tandis qu'`Esc` annule en restaurant les dimensions précédentes. Une
-action discrète « Sauvegarder ce format » ouvre une pop-up demandant un nom, puis
-enregistre le format dans les préférences utilisateur. Les formats enregistrés sont
-rechargés au prochain lancement et apparaissent à côté des formats intégrés. Le
-format actif est rappelé dans la ligne « Feuille - A4 (21.0 x 29.7 cm) » et dans
-le récapitulatif. Les préréglés sont stockés en TOML, dans `presets.toml`, selon
-le système :
-- Linux : `${XDG_CONFIG_HOME:-$HOME/.config}/imposer/presets.toml`
-- macOS : `$HOME/Library/Application Support/imposer/presets.toml`
-- Windows : `%APPDATA%\imposer\presets.toml` (ou, à défaut, `%LOCALAPPDATA%\imposer\presets.toml`,
-  puis `%USERPROFILE%\AppData\Roaming\imposer\presets.toml`)
-Les noms vides, trop longs ou déjà utilisés (formats intégrés inclus) sont refusés.
-
-
-## Interface graphique optionnelle (Slint)
-
-![Capture de l'interface graphique Slint](assets/screen_gui.png)
-
-La GUI est disponible uniquement en compilant avec la feature optionnelle
-`slint-ui` ou `gui` (alias) :
-```sh
+git clone https://github.com/Franck-Demongin/Imposer.git
+cd Imposer
+cargo build --release
 cargo build --release --features gui
-./target/release/imposer-gui
-```
-ou en développement :
-```sh
-cargo run --features gui --bin imposer-gui
 ```
 
-Ce build produit deux exécutables : `imposer` (CLI et TUI) et `imposer-gui`
-(interface graphique Slint), dont les deux sont publiés par la release.
-
-## Icône et intégration au bureau
-
-### Linux
-
-La barre des tâches lit l'icône via le fichier `.desktop` et l'`app_id`
-`io.github.Franck-Demongin.Imposer`. Pour installer localement :
+La première commande compile `imposer`; la seconde active l'interface graphique
+optionnelle et compile les deux binaires. Pour compiler uniquement la GUI :
 
 ```sh
 cargo build --release --features gui --bin imposer-gui
-./packaging/linux/install-local.sh
 ```
 
-Le script copie le binaire `target/release/imposer-gui` et
-`packaging/linux/io.github.Franck-Demongin.Imposer.desktop`, installe les PNG et
-le SVG dans `~/.local/share/icons/hicolor`, puis met à jour les caches s'ils sont
-disponibles. Pour supprimer cette installation :
+### Lancer les interfaces
+
+```sh
+target/release/imposer
+target/release/imposer-gui
+```
+
+Sous Windows :
+
+```powershell
+.\target\release\imposer.exe
+.\target\release\imposer-gui.exe
+```
+
+## Démarrage rapide
+
+Lancer la TUI sans argument ou sans chemin de sortie :
+
+```sh
+imposer --tui
+```
+
+Générer une planche depuis la ligne de commande :
+
+```sh
+imposer \
+  --input document.pdf \
+  --output planche.pdf \
+  --sheet sra3 \
+  --bleed 3 \
+  --safety-margin 5
+```
+
+## Entrées et compatibilité
+
+| Source | Type couleur | Résolution | Notes |
+| --- | --- | --- | --- |
+| PDF | RVB ou CMJN | Boîte de page source | Une ou deux pages, ressources préservées |
+| PNG ou JPEG | RVB | 300 DPI par défaut, lue si présente | Profil ICC ignoré, sortie DeviceRGB |
+| PSD | RVB, niveau de gris ou CMJN | Résolution intégrée, 300 DPI par défaut | Décodage Rust natif, ICC obligatoire en CMJN |
+
+Toutes les sources d'une même planche doivent respecter :
+
+- une différence de dimensions inférieure à `0,5 pt`;
+- un même type couleur, soit toutes RVB, soit toutes CMJN;
+- un profil CMJN compatible, comparé par SHA-256;
+- un fond perdu ne dépassant pas la moitié de l'une des dimensions source.
+
+Les dimensions d'entrée incluent déjà le fond perdu. La taille de découpe
+dérivée est `dimensions source - 2 × fond perdu`.
+
+## Processus d'imposition
+
+1. Calcul des dispositions candidates.
+2. Sélection de la disposition la plus dense, puis de la perte minimale.
+3. Rotation individuelle des copies pour améliorer le placement, sauf option
+   désactivée.
+4. Placement centré.
+5. Dérivation des repères de coupe depuis les arêtes de découpe uniques.
+6. Génération du PDF, avec préservation des ressources et métadonnées couleur.
+
+Le recto et le verso partagent la même grille de placement. Avec
+`--rotate-verso`, le verso subit une rotation de 180°; sans cette option, il
+conserve le même repère de feuille.
+
+## Référence de ligne de commande
+
+```sh
+imposer \
+  --input recto.pdf \
+  --input verso.pdf \
+  --output planche.pdf \
+  --sheet sra3 \
+  --bleed 3 \
+  --safety-margin 5
+```
+
+| Option | Défaut | Description |
+| --- | --- | --- |
+| `-i, --input` | absent | Source, option répétable |
+| `-o, --output` | absent | PDF généré |
+| `--sheet` | `a4` | `a4`, `a3`, `sra3` ou valeur personnalisée |
+| `--sheet-width-mm` | absent | Largeur de feuille personnalisée, en millimètres |
+| `--sheet-height-mm` | absent | Hauteur de feuille personnalisée, en millimètres |
+| `--sheet-orientation` | `auto` | `auto`, `portrait` ou `landscape` |
+| `--bleed` | `2.0` | Fond perdu en millimètres |
+| `--safety-margin` | `5.0` | Marge de sécurité en millimètres |
+| `--rotate-verso` | `false` | Force une rotation de 180° du verso |
+| `--no-rotate-copies` | `false` | Désactive la rotation optimisante des copies |
+| `--tui` | `false` | Lance l'interface texte |
+
+Les dimensions personnalisées doivent être fournies ensemble. Si l'entrée ou la
+sortie manque, `imposer` lance la TUI.
+
+## Interface texte (TUI)
+
+![Capture de l'interface texte (TUI)](assets/screen_tui.png)
+
+```sh
+imposer --tui
+```
+
+La TUI se lance automatiquement sans argument ou sans chemin de sortie. Elle
+permet de naviguer dans les formats `pdf`, `png`, `jpg`, `jpeg` et `psd` et
+d'ajouter jusqu'à deux sources. Un PDF de deux pages fournit les deux pages;
+lorsque plusieurs sources sont sélectionnées, seule la première page de chaque
+fichier est conservée. La touche `Suppr` retire la dernière source.
+
+Elle prend également en charge :
+
+- les formats A4, A3 et SRA3;
+- les dimensions de feuille selon l'utilisateur, avec validation;
+- les préréglés personnels persistants;
+- les contrôles, le niveau de statut et un indicateur d'activité pendant la
+  génération;
+- l'ouverture du fichier ou du dossier généré lorsqu'il est disponible.
+
+Les préréglés personnels sont stockés dans un fichier TOML :
+
+- Linux : `${XDG_CONFIG_HOME:-$HOME/.config}/imposer/presets.toml`
+- macOS : `$HOME/Library/Application Support/imposer/presets.toml`
+- Windows : `%APPDATA%\imposer\presets.toml`
+
+Les noms de préréglé doivent être uniques. Les noms vides ou trop longs sont
+refusés.
+
+## Interface graphique (Slint)
+
+![Capture de l'interface graphique Slint](assets/screen_gui.png)
+
+```sh
+cargo build --release --features gui
+target/release/imposer-gui
+```
+
+Sous Windows, le fichier construit est `target/release/imposer-gui.exe`. Cette
+interface graphique :
+
+- suit la palette système;
+- propose les mêmes options de feuille, de fond perdu, de marge et de verso;
+- garde l'interface réactive pendant la génération;
+- affiche les informations couleur, d'avancement et de chemin;
+- ouvre le fichier généré ou son dossier.
+
+Aucune action supplémentaire n'est nécessaire après compilation. L'icône
+d'application est incorporée lors de la compilation.
+
+## Formats de feuille et préréglés
+
+Les formats intégrés sont verrouillés sur A4, A3 et SRA3. Les dimensions
+personnalisées exigent une largeur et une hauteur, exprimées en millimètres.
+
+Les nouveaux préréglés sont validés avant d'être écrits, évitant qu'un fichier
+TOML devienne inutilisable à cause de valeurs incorrectes.
+
+## Profils couleur et PDF/X-4
+
+- Les sources RVB sont écrites en DeviceRGB.
+- Les sources CMJN conservent leur profil ICC.
+- Les sources PDF et PSD CMJN sont inspectées récursivement pour les intentions
+  de sortie et les profils ICC.
+- Les sources CMJN sont comparées par SHA-256 et doivent être compatibles.
+- Les métadonnées PDF/X-4 sont émises lorsque toutes les sources sont CMJN avec
+  un profil compatible.
+- La génération est native pour le CMJN compatible et utilise Ghostscript comme
+  repli pour RVB, les profils incompatibles et les cas non supportés.
+- Aucune conversion implicite n'existe entre RVB et CMJN.
+
+La ligne de commande affiche le profil couleur détecté pour chaque source avant
+génération.
+
+## Sortie et repères de coupe
+
+- La ligne de commande indique le chemin généré et la taille du fichier.
+- Toutes les sources font l'objet d'un rapport couleur.
+- Les repères utilisent les arêtes de coupe uniques, avec tolérance `0,01 mm`.
+- Les marques font `2 mm`, sont placées à au moins la distance du fond perdu de
+  la découpe, ont `0,25 pt` et sont de couleur register.
+- Les repères sont dessinés uniquement dans la marge extérieure de la feuille.
+- Une marge de feuille insuffisante provoque une erreur.
+
+## Intégration Linux
+
+L'identifiant XDG est :
+
+```text
+io.github.Franck-Demongin.Imposer
+```
+
+Compilation et installation locale :
+
+```sh
+cargo build --release --features gui --bin imposer-gui
+./packaging/linux/install-local.sh target/release/imposer-gui
+```
+
+Le script vérifie l'exécutable, l'installe dans `~/.local/bin`, enregistre l'entrée
+de bureau et les icônes hicolor, et rafraîchit les caches disponibles.
+Désinstallation :
 
 ```sh
 ./packaging/linux/uninstall-local.sh
 ```
 
-Avec `cargo run`, GNOME n'affiche l'icône correcte qu'après installation du
-`.desktop`. Le fichier est également fourni dans `packaging/linux`.
+Les champs `Icon=` et `StartupWMClass=` doivent rester identiques à l'identifiant
+d'application. L'interface Slint appelle `slint::set_xdg_app_id` après la
+création de la fenêtre, ce qui est requis sous GNOME/Wayland. GNOME/Wayland peut
+nécessiter une nouvelle session avant d'afficher le lanceur fraîchement installé.
 
-### Windows
+## Intégration Windows
 
-L'icône est embarquée à la compilation dans l'exécutable `imposer-gui.exe` via
-`winresource` et `build.rs` (`assets/icons/imposer.ico`). Aucune action manuelle
-n'est nécessaire.
+- L'icône est intégrée à `imposer-gui.exe` pendant la compilation par
+  `winresource` et `build.rs`.
+- Aucune installation supplémentaire n'est requise.
+- Le paramètre `windows_subsystem = "windows"` évite l'ouverture d'une console.
 
-### Remplacer l'icône
+## Icônes et ressources
 
-Remplacez `assets/icons/imposer.svg` et les fichiers PNG/ICO, ou exécutez
-`assets/icons/generate.sh` avec `rsvg-convert`/ImageMagick si le fichier source
-a changé. Les fichiers générés sont versionnés pour que le build normal ne
-dépende pas de ces outils.
-
-## Utilisation CLI
-
-Une source :
+Les icônes sont générées depuis `assets/icons/imposer.svg` :
 
 ```sh
-./target/release/imposer \
-  --input document.pdf \
-  --output planche.pdf \
-  --sheet a4 \
-  --bleed 2 \
-  --sheet-orientation auto
+./assets/icons/generate.sh
 ```
 
-Recto/verso à partir de deux fichiers :
+Les PNG et ICO générés sont gardés dans le dépôt afin que le build habituel ne
+dépende pas de `rsvg-convert` ni d'ImageMagick. Régénérez ces ressources après
+modification du SVG source.
+
+## Développement
+
+Dépendances sur Ubuntu :
 
 ```sh
-./target/release/imposer \
-  --input recto.pdf \
-  --input verso.pdf \
-  --output planche.pdf \
-  --sheet sra3
+sudo apt-get install -y \
+  libfontconfig1-dev \
+  libfreetype6-dev \
+  libx11-dev \
+  libxkbcommon-dev \
+  libwayland-dev \
+  desktop-file-utils
 ```
 
-Options principales : `--sheet` (`a4`, `a3`, `sra3`), `--sheet-width-mm` et
-`--sheet-height-mm` (dimensions personnalisées en millimètres, utilisées
-ensemble), `--sheet-orientation` (`auto`, `portrait`, `landscape`),
-`--rotate-verso` (force a 180° rotation of verso sheets, default false),
-`--bleed` (mm), `--safety-margin` (mm), `--no-rotate-copies`, `--tui`.
-
-Les sources CMYK conservent leur profil ICC et, si tous les profils sont
-compatibles, les métadonnées PDF/X-4. Les sources RVB sont écrites en
-DeviceRGB. Aucune conversion implicite entre les deux familles de couleur n'est
-effectuée. La rotation des versos n'est appliquée que si `--rotate-verso` est
-demandé.
-
-## Tests
+Validation locale :
 
 ```sh
-cargo test
-cargo test --all-features
-cargo clippy --all-targets --all-features -- -D warnings
 cargo fmt --check
-cargo build --release --features slint-ui
+cargo test
+cargo test --locked
+cargo clippy --all-targets --all-features -- -D warnings
+cargo build
+cargo build --features gui
 ```
 
-## Publication
+Valider l'entrée de bureau sur Linux :
 
-La GitHub Action `.github/workflows/release.yml` déclenche une publication lors d'un
-push de tag `v*`. Le premier job crée la release et ses notes à partir des commits
-depuis le tag précédent, puis publie sous Windows les binaires `imposer.exe` et
-`imposer-gui.exe`. Un second job Linux, qui dépend du premier, ajoute ensuite
-`imposer` et `imposer-gui` à la même release.
+```sh
+desktop-file-validate packaging/linux/io.github.Franck-Demongin.Imposer.desktop
+```
+
+## CI et publications
+
+La CI compile sur Ubuntu et Windows, exécute les tests, valide l'entrée bureau et
+utilise les builds verrouillés. La publication est déclenchée par un tag `v*` :
+
+1. Le job Windows construit les binaires, génère les notes depuis le tag
+   précédent, puis publie `imposer.exe` et `imposer-gui.exe`.
+2. Le job Linux dépend du précédent, puis ajoute `imposer` et `imposer-gui`.
+
+Les builds natifs ciblent `windows-latest` et `ubuntu-latest`. Les artefacts sont
+tous attachés à la même release.
+
+## Structure du dépôt
+
+```text
+src/main.rs                 Point d'entrée CLI
+src/lib.rs                  Bibliothèque partagée et API publique
+src/tui.rs                  Interface texte
+src/slint_ui.rs             Interface graphique Slint
+ui/main.slint               Interface Slint et jetons de style
+src/generation.rs           Orchestration partagée
+src/layout.rs               Calcul de la mise en page
+src/pdf.rs                  Génération PDF et repères de coupe
+src/source.rs               Formats d'entrée et dimensions
+src/config.rs               Options d'imposition
+src/icc.rs                  Gestion des profils ICC
+packaging/linux/            Intégration bureau
+assets/icons/               Icônes et script de génération
+tests/                      Tests unitaires et d'intégration
+```
+
+## Contribuer
+
+Exécutez les commandes de validation locale avant soumission. Les messages de
+commit sont en anglais et respectent le format Conventional Commits. Pour les
+changements d'interface, conservez le thème système et laissez l'identifiant
+application correspondre à `io.github.Franck-Demongin.Imposer`.
+
+Pour les changements concernant les couleurs ou les formats de feuille, décrivez
+la couverture de tests de non-régression attendue dans la pull request.
+
+## Licence
+
+Le projet est sous licence MIT selon le champ `license` de `Cargo.toml`. Les
+dépendances Rust et Slint conservent leur licence propre.
