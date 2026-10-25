@@ -376,4 +376,113 @@ fn _use_sheet_spec(_s: SheetSpec) {}
 #[allow(unused)]
 fn _use_icc(_p: IccProfile) {}
 
+pub fn import_raster(
+    builder: &mut OutputBuilder,
+    source: &crate::source::SourcePage,
+) -> Result<ImportedPage> {
+    use crate::error::ImposerError;
+
+    match &source.kind {
+        crate::source::SourceKind::Raster {
+            pixels,
+            width_px,
+            height_px,
+            color_space,
+            icc_profile,
+        } => {
+            if *width_px == 0 || *height_px == 0 {
+                return Err(ImposerError::Generation(
+                    "dimensions raster invalides".to_string(),
+                ));
+            }
+
+            let color_space_obj = match color_space {
+                crate::source::ImageColorSpace::DeviceGray => {
+                    lopdf::Object::Name(b"DeviceGray".to_vec())
+                }
+                crate::source::ImageColorSpace::DeviceRgb => {
+                    lopdf::Object::Name(b"DeviceRGB".to_vec())
+                }
+                crate::source::ImageColorSpace::DeviceCmyk => {
+                    let profile = icc_profile.as_deref().ok_or(ImposerError::NoProfile)?;
+                    let profile_bytes = profile.to_vec();
+                    let mut icc_dict = lopdf::Dictionary::new();
+                    icc_dict.set("N", lopdf::Object::Integer(4));
+                    icc_dict.set("Length", lopdf::Object::Integer(profile_bytes.len() as i64));
+                    let id = builder.document.add_object(lopdf::Stream {
+                        dict: icc_dict,
+                        content: profile_bytes,
+                        allows_compression: false,
+                        start_position: None,
+                    });
+                    lopdf::Object::Array(vec![
+                        lopdf::Object::Name(b"ICCBased".to_vec()),
+                        lopdf::Object::Reference(id),
+                    ])
+                }
+            };
+
+            let mut image_dict = lopdf::Dictionary::new();
+            image_dict.set("Type", lopdf::Object::Name(b"XObject".to_vec()));
+            image_dict.set("Subtype", lopdf::Object::Name(b"Image".to_vec()));
+            image_dict.set("Width", lopdf::Object::Integer(*width_px as i64));
+            image_dict.set("Height", lopdf::Object::Integer(*height_px as i64));
+            image_dict.set("ColorSpace", color_space_obj);
+            image_dict.set("BitsPerComponent", lopdf::Object::Integer(8));
+
+            image_dict.set("Length", lopdf::Object::Integer(pixels.len() as i64));
+            let mut image_stream = lopdf::Stream::new(image_dict, pixels.clone());
+            image_stream.allows_compression = true;
+            let image_id = builder.document.add_object(image_stream);
+
+            let width_pt = source.width_pt as f64;
+            let height_pt = source.height_pt as f64;
+            let content = format!(
+                "q {width_pt} 0 0 {height_pt} 0 0 cm /Img Do Q
+"
+            );
+            let mut form_dict = lopdf::Dictionary::new();
+            form_dict.set("Type", lopdf::Object::Name(b"XObject".to_vec()));
+            form_dict.set("Subtype", lopdf::Object::Name(b"Form".to_vec()));
+            form_dict.set(
+                "BBox",
+                lopdf::Object::Array(vec![
+                    0.0.into(),
+                    0.0.into(),
+                    width_pt.into(),
+                    height_pt.into(),
+                ]),
+            );
+
+            let mut xobjects = lopdf::Dictionary::new();
+            xobjects.set(b"Img".to_vec(), lopdf::Object::Reference(image_id));
+            let mut resources = lopdf::Dictionary::new();
+            resources.set(b"XObject".to_vec(), lopdf::Object::Dictionary(xobjects));
+            form_dict.set("Resources", lopdf::Object::Dictionary(resources));
+
+            let form_bytes = content.into_bytes();
+            form_dict.set("Length", lopdf::Object::Integer(form_bytes.len() as i64));
+            let mut form_stream = lopdf::Stream::new(form_dict, form_bytes);
+            form_stream.allows_compression = true;
+            let form_id = builder.document.add_object(form_stream);
+
+            Ok(ImportedPage {
+                form_id,
+                width_pt,
+                height_pt,
+                media_box: None,
+                crop_box: None,
+                bleed_box: None,
+                trim_box: None,
+                art_box: None,
+                rotation_deg: 0,
+                user_unit: 1.0,
+            })
+        }
+        _ => Err(ImposerError::Generation(
+            "source raster attendue".to_string(),
+        )),
+    }
+}
+
 fn _keep() {}

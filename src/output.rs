@@ -103,6 +103,17 @@ impl OutputBuilder {
         placements: &[Placement],
         imported_index: usize,
     ) -> Result<lopdf::ObjectId> {
+        self.add_sheet_full(spec, placements, imported_index, false, false)
+    }
+
+    pub fn add_sheet_full(
+        &mut self,
+        spec: &SheetSpec,
+        placements: &[Placement],
+        imported_index: usize,
+        item_rotated: bool,
+        face_rotated: bool,
+    ) -> Result<lopdf::ObjectId> {
         let form = self
             .imported
             .get(imported_index)
@@ -115,25 +126,101 @@ impl OutputBuilder {
             lopdf::Object::Reference(form.form_id),
         );
 
+        // Ressources nécessaires aux marques de coupe, avec un objet dédié à la feuille.
+        let mut ext_gstates = lopdf::Dictionary::new();
+        let mut overprint_gs = lopdf::Dictionary::new();
+        overprint_gs.set("Type", lopdf::Object::Name(b"ExtGState".to_vec()));
+        overprint_gs.set("OP", lopdf::Object::Boolean(true));
+        overprint_gs.set("op", lopdf::Object::Boolean(true));
+        overprint_gs.set("OPM", lopdf::Object::Integer(1));
+        let overprint_id = self.document.add_object(overprint_gs);
+        ext_gstates.set(b"RegGS".to_vec(), lopdf::Object::Reference(overprint_id));
+
+        let separation = lopdf::Object::Array(vec![
+            lopdf::Object::Name(b"Separation".to_vec()),
+            lopdf::Object::Name(b"All".to_vec()),
+            lopdf::Object::Name(b"DeviceCMYK".to_vec()),
+            lopdf::Object::Dictionary({
+                let mut function = lopdf::Dictionary::new();
+                function.set("FunctionType", lopdf::Object::Integer(2));
+                function.set("Domain", lopdf::Object::Array(vec![0.0.into(), 1.0.into()]));
+                function.set(
+                    "Range",
+                    lopdf::Object::Array(vec![
+                        0.0.into(),
+                        1.0.into(),
+                        0.0.into(),
+                        1.0.into(),
+                        0.0.into(),
+                        1.0.into(),
+                        0.0.into(),
+                        1.0.into(),
+                    ]),
+                );
+                function.set(
+                    "C0",
+                    lopdf::Object::Array(vec![0.0.into(), 0.0.into(), 0.0.into(), 0.0.into()]),
+                );
+                function.set(
+                    "C1",
+                    lopdf::Object::Array(vec![1.0.into(), 1.0.into(), 1.0.into(), 1.0.into()]),
+                );
+                function.set("N", lopdf::Object::Integer(1));
+                function
+            }),
+        ]);
+        let mut color_spaces = lopdf::Dictionary::new();
+        color_spaces.set(b"Reg".to_vec(), separation);
+
         let w = spec.width_pt;
         let h = spec.height_pt;
         let bleed = self.options.source_bleed_pt;
         let mut ops: Vec<lopdf::content::Operation> = Vec::new();
+
+        if face_rotated {
+            ops.push(lopdf::content::Operation::new("q", vec![]));
+            ops.push(lopdf::content::Operation::new(
+                "cm",
+                vec![
+                    (-1.0_f64).into(),
+                    0.0.into(),
+                    0.0.into(),
+                    (-1.0_f64).into(),
+                    w.into(),
+                    h.into(),
+                ],
+            ));
+        }
+
         for p in placements {
             ops.push(lopdf::content::Operation::new("q", vec![]));
             let cx = p.trim_x as f64 - bleed;
             let cy = p.trim_y as f64 - bleed;
-            ops.push(lopdf::content::Operation::new(
-                "cm",
-                vec![
-                    1.0.into(),
-                    0.0.into(),
-                    0.0.into(),
-                    1.0.into(),
-                    cx.into(),
-                    cy.into(),
-                ],
-            ));
+            if item_rotated {
+                ops.push(lopdf::content::Operation::new(
+                    "cm",
+                    vec![
+                        0.0.into(),
+                        1.0.into(),
+                        (-1.0_f64).into(),
+                        0.0.into(),
+                        (cx + p.trim_w as f64 + bleed * 2.0).into(),
+                        cy.into(),
+                    ],
+                ));
+            } else {
+                ops.push(lopdf::content::Operation::new(
+                    "cm",
+                    vec![
+                        1.0.into(),
+                        0.0.into(),
+                        0.0.into(),
+                        1.0.into(),
+                        cx.into(),
+                        cy.into(),
+                    ],
+                ));
+            }
             ops.push(lopdf::content::Operation::new(
                 "Do",
                 vec![lopdf::Object::Name(form_name.as_bytes().to_vec())],
@@ -141,9 +228,12 @@ impl OutputBuilder {
             ops.push(lopdf::content::Operation::new("Q", vec![]));
         }
 
-        // Crop marks: build a LayoutPlan equivalent
         let plan = build_plan_from_sheet(spec, placements, self.options.source_bleed_pt as f32);
-        let _ = crate::pdf::draw_crop_marks(&mut ops, &plan);
+        crate::pdf::draw_crop_marks(&mut ops, &plan)?;
+
+        if face_rotated {
+            ops.push(lopdf::content::Operation::new("Q", vec![]));
+        }
 
         let content_data = {
             let content = lopdf::content::Content { operations: ops };
@@ -152,14 +242,15 @@ impl OutputBuilder {
                 .map_err(|e| ImposerError::Generation(e.to_string()))?
         };
 
+        let mut content_dict = lopdf::Dictionary::new();
+        content_dict.set("Length", lopdf::Object::Integer(content_data.len() as i64));
         let content_id = self.document.add_object(lopdf::Stream {
-            dict: lopdf::Dictionary::new(),
+            dict: content_dict,
             content: content_data,
             allows_compression: true,
             start_position: None,
         });
 
-        // TrimBox etc
         let media_box = lopdf::Object::Array(vec![0.0.into(), 0.0.into(), w.into(), h.into()]);
         let bleed_box = lopdf::Object::Array(vec![0.0.into(), 0.0.into(), w.into(), h.into()]);
         let trim_x = spec.trim_x_pt;
@@ -175,6 +266,8 @@ impl OutputBuilder {
 
         let mut resources = lopdf::Dictionary::new();
         resources.set("XObject", lopdf::Object::Dictionary(xobjects));
+        resources.set("ExtGState", lopdf::Object::Dictionary(ext_gstates));
+        resources.set("ColorSpace", lopdf::Object::Dictionary(color_spaces));
 
         let mut page_dict = lopdf::Dictionary::new();
         page_dict.set("Type", lopdf::Object::Name(b"Page".to_vec()));
@@ -267,12 +360,14 @@ impl OutputBuilder {
 
         // Metadata stream (XMP)
         let xmp = build_xmp(&self.options);
+        let xmp_bytes = xmp.into_bytes();
         let mut md_dict = lopdf::Dictionary::new();
         md_dict.set("Type", lopdf::Object::Name(b"Metadata".to_vec()));
         md_dict.set("Subtype", lopdf::Object::Name(b"XML".to_vec()));
+        md_dict.set("Length", lopdf::Object::Integer(xmp_bytes.len() as i64));
         let md_id = self.document.add_object(lopdf::Stream {
             dict: md_dict,
-            content: xmp.into_bytes(),
+            content: xmp_bytes,
             allows_compression: false,
             start_position: None,
         });
@@ -355,9 +450,11 @@ impl OutputBuilder {
         dict.set("Type", lopdf::Object::Name(b"ICCProfile".to_vec()));
         dict.set("N", lopdf::Object::Integer(4));
         // Let profile size? optional
+        let profile_bytes = self.profile.bytes.clone();
+        dict.set("Length", lopdf::Object::Integer(profile_bytes.len() as i64));
         let id = self.document.add_object(lopdf::Stream {
             dict,
-            content: self.profile.bytes.clone(),
+            content: profile_bytes,
             allows_compression: false,
             start_position: None,
         });

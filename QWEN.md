@@ -32,6 +32,7 @@ Main modules:
 - `src/output.rs`: alternate output builder based on imported pages (not used by current `pdf.rs` pipeline)
 - `src/numfmt.rs`: numeric formatting helpers for output metadata
 - `src/error.rs`: typed errors (including mixed RGB/CMYK and incompatible ICC profile conflicts)
+- `src/generation.rs`: shared generation orchestration (CLI/TUI), tries native CMYK PDF/X-4 output and keeps Ghostscript as fallback
 
 ## Building and Running
 
@@ -96,6 +97,7 @@ Integration tests are in `tests/integration_test.rs`. Test fixtures are in
   the same transform.
 - Deep copying is used for page resources, hierarchical forms, ICC streams, and OutputIntents.
 - PDF and PSD sources are inspected recursively for GTS_PDFX OutputIntents and ICCBased CMYK profiles; multiple distinct ICC profiles are rejected.
+- CMYK jobs with compatible profiles can use native PDF/X-4 emission; Ghostscript remains the fallback for RGB, incompatible or missing profiles, and native-generation failures.
 - PSD CMYK sources require a valid embedded ICC profile, are not silently converted to RGB, use embedded PSD resolution when present (otherwise 300 DPI), and still reject CMYK without a profile. Mixtures of RGB and CMYK sources are rejected.
 - CMYK profiles from mixed PDF and PSD source sets are compared by SHA-256 and treated as compatible only when those hashes match.
 - PDF/X-4 metadata (OutputIntent, ICC-based streams, XMP, Info, `/ID`, and Media/Bleed/Trim boxes) is emitted when every source is CMYK and either one source declares an OutputIntent or the sources share a compatible ICC profile.

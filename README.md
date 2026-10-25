@@ -52,13 +52,13 @@ rustc --version
 cargo --version
 ```
 
-Pour la commande CLI/TUI qui écrit le PDF certifié, Ghostscript doit être
-installé et disponible (commande `gs` sous Linux/macOS, `gswin64c.exe` sous
-Windows).
-
-Pour traiter les PSD, le décodeur Rust lit le composite directement ; aucune
-commande `magick` n'est nécessaire. Ghostscript reste requis pour la
-certification PDF/X-4.
+Pour la commande CLI/TUI qui écrit le PDF certifié, l'émission PDF/X-4 est
+native pour les sources CMJN ayant un profil ICC compatible ; dans ce cas,
+Ghostscript n'est pas nécessaire à l'exécution. Ghostscript reste utilisé
+comme solution de repli pour les sources RVB, les profils ICC incompatibles
+ou non supportés, les formats non gérés par le moteur natif et les défaillances
+de la génération native. Le décodeur Rust lit directement le composite des PSD
+; aucune commande `magick` n'est nécessaire.
 
 Pour compiler avec la GUI Slint (`--features gui`), les bibliothèques
 Slint/Wayland sont également nécessaires sous Linux.

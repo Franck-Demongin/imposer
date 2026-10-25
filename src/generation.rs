@@ -6,8 +6,16 @@
 
 use crate::config::ImpositionConfig;
 use crate::error::{ImposerError, Result};
+use crate::geometry::mm_to_pt_f64;
+use crate::icc::IccProfile;
+use crate::import::{import_page, import_raster};
+use crate::layout::compute_layout;
+use crate::output::BoxSource;
+use crate::output::{OutputBuilder, OutputOptions};
 use crate::pdf::impose_sources;
-use crate::source::SourcePage;
+use crate::pipeline::PrintPipeline;
+use crate::source::{SourceColorKind, SourceKind, SourcePage};
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
 
@@ -99,6 +107,127 @@ pub fn generate(
 
     let profiles: Vec<String> = sources.iter().map(SourcePage::color_label).collect();
 
+    if let Ok(report) = try_native_generate(sources, options, output_path.clone()) {
+        return Ok(GenerateReport { profiles, ..report });
+    }
+
+    generate_with_ghostscript(sources, options, output_path, profiles)
+}
+
+fn try_native_generate(
+    sources: &[SourcePage],
+    options: &ImpositionConfig,
+    output_path: PathBuf,
+) -> Result<GenerateReport> {
+    if sources.is_empty() {
+        return Err(ImposerError::InvalidPageCount(0));
+    }
+    if sources.len() != 1 && sources.len() != 2 {
+        return Err(ImposerError::InvalidPageCount(sources.len()));
+    }
+
+    if sources
+        .iter()
+        .any(|source| source.color_kind() != SourceColorKind::Cmyk)
+    {
+        return Err(ImposerError::Generation(
+            "le moteur natif ne prend en charge que les sources CMJN".to_string(),
+        ));
+    }
+
+    let first = &sources[0];
+    let source_w = first.width_pt;
+    let source_h = first.height_pt;
+    for source in sources {
+        if (source.width_pt - source_w).abs() > 0.5 || (source.height_pt - source_h).abs() > 0.5 {
+            return Err(ImposerError::Dimensions(
+                "sources de dimensions hétérogènes".to_string(),
+            ));
+        }
+    }
+
+    let profiles: Vec<IccProfile> = sources
+        .iter()
+        .map(SourcePage::cmyk_profile)
+        .collect::<Option<Vec<_>>>()
+        .ok_or(ImposerError::NoProfile)?;
+    let profile_hashes: BTreeSet<[u8; 32]> = profiles.iter().map(|p| p.info.sha256).collect();
+    if profile_hashes.len() > 1 {
+        return Err(ImposerError::IncompatibleProfiles(
+            sources
+                .iter()
+                .map(SourcePage::color_label)
+                .collect::<Vec<_>>()
+                .join(" ; "),
+        ));
+    }
+
+    let source_bleed_pt = mm_to_pt_f64(options.bleed_mm as f64);
+    let output_options = OutputOptions {
+        source_bleed_pt,
+        creation_date: "D:20260101000000Z".to_string(),
+        mod_date: "D:20260101000000Z".to_string(),
+        box_source: BoxSource::Bleed,
+        ..OutputOptions::default()
+    };
+
+    let mut builder = OutputBuilder::new(profiles[0].clone(), output_options);
+
+    for source in sources {
+        // Avoid stale object-ID remapping across independent source documents
+        // (the deep-copy cache key is only a numeric object id): clear it for
+        // each source while still deduplicating within one import.
+        builder.resource_cache.clear();
+        let imported = match &source.kind {
+            SourceKind::PdfPage { bytes, page_index } => {
+                let src = crate::source::open_pdf_source(bytes.clone())?;
+                import_page(&mut builder, &src, *page_index)?
+            }
+            SourceKind::Raster { .. } => import_raster(&mut builder, source)?,
+        };
+        builder.register_imported(imported);
+    }
+
+    let plan = compute_layout(source_w, source_h, options)?;
+    let spec = crate::layout::SheetSpec {
+        width_pt: plan.sheet_width as f64,
+        height_pt: plan.sheet_height as f64,
+        bleed_pt: source_bleed_pt,
+        safety_margin_pt: crate::geometry::mm_to_pt_f64(5.0),
+        trim_x_pt: 0.0,
+        trim_y_pt: 0.0,
+        trim_w_pt: plan.sheet_width as f64,
+        trim_h_pt: plan.sheet_height as f64,
+    };
+
+    let placements = plan.placements.clone();
+    for source_index in 0..sources.len() {
+        let face_rotated = options.rotate_verso && source_index == 1;
+        builder.add_sheet_full(
+            &spec,
+            &placements,
+            source_index,
+            plan.item_rotated,
+            face_rotated,
+        )?;
+    }
+
+    builder.write_to(&output_path)?;
+
+    let output_size = fs::metadata(&output_path).map_err(ImposerError::Io)?.len() as usize;
+    Ok(GenerateReport {
+        output_path,
+        output_size,
+        profiles: Vec::new(),
+    })
+}
+
+fn generate_with_ghostscript(
+    sources: &[SourcePage],
+    options: &ImpositionConfig,
+    output_path: PathBuf,
+    profiles: Vec<String>,
+) -> Result<GenerateReport> {
     // 1. Générer d'abord le PDF hybride lopdf dans un fichier temporaire.
     let hybrid_bytes = impose_sources(sources, options)?;
     let hybrid_dir = std::env::temp_dir();
@@ -110,7 +239,7 @@ pub fn generate(
     fs::write(&hybrid_path, &hybrid_bytes)?;
 
     // 2. Certifier le PDF hybride en PDF/X-4 avec Ghostscript.
-    let pipeline = crate::pipeline::PrintPipeline::new().map_err(ImposerError::Io)?;
+    let pipeline = PrintPipeline::new().map_err(ImposerError::Io)?;
     pipeline.finalize_pdf_x(
         hybrid_path.to_string_lossy().as_ref(),
         output_path.to_string_lossy().as_ref(),
