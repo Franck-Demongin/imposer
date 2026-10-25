@@ -27,18 +27,117 @@ jobs:
             libfreetype6-dev \
             libx11-dev \
             libxkbcommon-dev \
-            libwayland-dev
+            libwayland-dev \
+            desktop-file-utils
+
+      - name: Check tracked files and assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::$1"; exit 1; }
+          git ls-files --error-unmatch Cargo.lock >/dev/null 2>&1 \
+            || fail "Cargo.lock is not tracked by git"
+
+          for size in 16 32 48 64 128 256 512; do
+            test -f "assets/icons/imposer-${size}.png" \
+              || fail "missing assets/icons/imposer-${size}.png"
+          done
+
+          for f in \
+            assets/icons/imposer.svg \
+            assets/icons/imposer.ico \
+            assets/icons/generate.sh \
+            assets/icons/ui/file-open.svg \
+            assets/icons/ui/folder-open.svg \
+            assets/icons/ui/delete.svg \
+            assets/icons/ui/document-save.svg \
+            packaging/linux/install-local.sh \
+            packaging/linux/uninstall-local.sh
+          do
+            test -f "$f" || fail "missing $f"
+          done
+
+      - name: Check APP_ID consistency and Linux packaging
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::$1"; exit 1; }
+
+          SRC=src/slint_ui.rs
+
+          # 1. APP_ID : une seule déclaration, au niveau du module, sur une ligne
+          [ "$(grep -c '^pub const APP_ID: &str = ' "$SRC" || true)" -eq 1 ] \
+            || fail "$SRC must contain exactly one module-level 'pub const APP_ID: &str = ...;'"
+
+          if grep -nE '^[[:space:]]+(pub )?const APP_ID' "$SRC"; then
+            fail "APP_ID must not be redeclared inside a function or block"
+          fi
+
+          APP_ID=$(sed -n 's/^pub const APP_ID: &str = "\([^"]*\)";.*/\1/p' "$SRC")
+
+          [ -n "$APP_ID" ] || fail "cannot extract APP_ID value from $SRC"
+
+          echo "$APP_ID" | grep -Eq '^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+){2,}$' \
+            || fail "APP_ID '$APP_ID' is not a reverse-DNS identifier (>= 3 segments)"
+
+          echo "APP_ID=$APP_ID"
+
+          # 2. Ordre : AppWindow::new() AVANT set_xdg_app_id (lignes de commentaire ignorées)
+          NEW_LINE=$(grep -n 'AppWindow::new()' "$SRC" | grep -v '^[0-9]*:[[:space:]]*//' | head -n1 | cut -d: -f1 || true)
+
+          SET_LINE=$(grep -n 'slint::set_xdg_app_id(' "$SRC" | grep -v '^[0-9]*:[[:space:]]*//' | head -n1 | cut -d: -f1 || true)
+
+          [ -n "$NEW_LINE" ] || fail "AppWindow::new() not found in $SRC"
+
+          [ -n "$SET_LINE" ] || fail "slint::set_xdg_app_id( not found in $SRC"
+
+          [ "$NEW_LINE" -lt "$SET_LINE" ] \
+            || fail "slint::set_xdg_app_id must be called AFTER AppWindow::new() (GNOME/Wayland: reverse order => icon not applied)"
+
+          # 3. Erreur testée, constante utilisée (pas de littéral, pas de 'let _ =')
+          grep -q 'if let Err(.*) = slint::set_xdg_app_id(APP_ID)' "$SRC" \
+            || fail "expected 'if let Err(e) = slint::set_xdg_app_id(APP_ID)'"
+
+          if grep -n 'let _ = slint::set_xdg_app_id' "$SRC"; then
+            fail "set_xdg_app_id result must not be discarded"
+          fi
+
+          # 4. .desktop : nom de fichier et lignes exactes (grep -F : les points ne sont pas des jokers)
+          DESKTOP="packaging/linux/${APP_ID}.desktop"
+
+          [ -f "$DESKTOP" ] || fail "missing $DESKTOP (file name must be <APP_ID>.desktop)"
+
+          [ "$(ls packaging/linux/*.desktop | wc -l)" -eq 1 ] \
+            || fail "exactly one .desktop file expected in packaging/linux/"
+
+          for line in "Icon=${APP_ID}" "StartupWMClass=${APP_ID}" "Exec=imposer-gui" "Terminal=false"; do
+            grep -Fxq -- "$line" "$DESKTOP" || fail "$DESKTOP: missing exact line '$line'"
+          done
+
+          # 5. Scripts d'installation/désinstallation
+          for s in install-local.sh uninstall-local.sh; do
+            grep -Fxq -- "APP_ID=\"${APP_ID}\"" "packaging/linux/$s" \
+              || fail "packaging/linux/$s: missing exact line APP_ID=\"${APP_ID}\""
+          done
+
+          grep -Fq -- '/apps/$APP_ID.png' packaging/linux/install-local.sh \
+            || fail "install-local.sh must install hicolor PNG as \$APP_ID.png"
+
+          grep -Fq -- '/apps/$APP_ID.svg' packaging/linux/install-local.sh \
+            || fail "install-local.sh must install scalable SVG as \$APP_ID.svg"
+
+          # 6. Aucun autre identifiant io.github.* divergent dans src, packaging, ui
+          LEFTOVER=$(grep -rhF 'io.github.' src packaging ui | sed "s/${APP_ID}//g" | grep -F 'io.github.' || true)
+
+          [ -z "$LEFTOVER" ] || fail "other 'io.github.' identifiers found: $LEFTOVER"
+
+          # 7. Validation freedesktop
+          desktop-file-validate "$DESKTOP"
 
       - run: cargo fmt --check
+
       - run: cargo test
-      - name: Check application icon files
-        run: |
-          test -f assets/icons/imposer-256.png
-          test -f assets/icons/imposer-32.png
-          test -f assets/icons/imposer-16.png
-          test -f assets/icons/imposer.svg
-          test -f assets/icons/imposer.ico
-          test -f packaging/linux/io.github.Franck-Demongin.Imposer.desktop
 
       - name: Build without GUI feature
         run: cargo build
