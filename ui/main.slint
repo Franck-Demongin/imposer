@@ -378,6 +378,7 @@ export component AppWindow inherits Window {
                 VerticalLayout {
                     padding: Theme.spacing-s;
                     spacing: Theme.spacing-s;
+                    alignment: stretch;
 
                     Text {
                         text: "Enregistrer le format actuel";
@@ -391,7 +392,11 @@ export component AppWindow inherits Window {
                         wrap: word-wrap;
                         font-size: Theme.font-secondary;
                     }
+                    Rectangle {
+                        vertical-stretch: 1;
+                    }
                     HorizontalLayout {
+                        vertical-stretch: 0;
                         spacing: Theme.spacing-m;
                         padding-top: Theme.spacing-s;
                         alignment: end;
@@ -426,6 +431,7 @@ export component AppWindow inherits Window {
                 VerticalLayout {
                     padding: Theme.spacing-s;
                     spacing: Theme.spacing-s;
+                    alignment: stretch;
 
                     Text {
                         text: "Supprimer le format « " + root.delete-preset-name + " » ?";
@@ -438,7 +444,11 @@ export component AppWindow inherits Window {
                         font-size: Theme.font-secondary;
                         color: root.delete-preset-error == "" ? Palette.alternate-foreground : #c42b1c;
                     }
+                    Rectangle {
+                        vertical-stretch: 1;
+                    }
                     HorizontalLayout {
+                        vertical-stretch: 0;
                         spacing: Theme.spacing-m;
                         padding-top: Theme.spacing-s;
                         alignment: end;
