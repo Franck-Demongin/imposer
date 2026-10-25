@@ -1256,17 +1256,15 @@ impl App {
 
         // Pop-up de saisie des dimensions personnalisées.
         if let Some(popup) = self.custom_popup.clone() {
-            let popup_area = centered_rect(70, 14, f.area());
+            let popup_area = centered_rect(70, 11, f.area());
             f.render_widget(Clear, popup_area);
             let rows = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
-                    Constraint::Length(3),
-                    Constraint::Length(3),
-                    Constraint::Length(3),
-                    Constraint::Length(2),
-                    Constraint::Length(2),
-                    Constraint::Length(3),
+                    Constraint::Length(3), // Titre
+                    Constraint::Length(3), // Largeur
+                    Constraint::Length(3), // Hauteur
+                    Constraint::Length(2), // Message
                 ])
                 .split(popup_area);
             f.render_widget(
