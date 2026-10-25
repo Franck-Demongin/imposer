@@ -13,11 +13,13 @@ pub mod output;
 pub mod pdf;
 pub mod pipeline;
 pub mod preflight;
+pub mod presets;
 pub mod profile;
 pub mod source;
 
 pub use config::ImpositionConfig;
 pub use config::ImpositionConfig as ImposeOptions;
+pub use config::SheetPreset;
 pub use error::{ImposerError, Result};
 pub use generation::GenerateReport;
 pub use generation::{generate, parse_source_bytes, read_source_pages, validate_options};
@@ -33,6 +35,9 @@ pub use pdf::{
     draw_crop_marks,
 };
 pub use preflight::{PreflightReport, preflight, preflight_output, preflight_source};
+pub use presets::{
+    UserPreset, load_user_presets, save_user_presets, user_presets_path, validate_user_preset,
+};
 pub use profile::{ProfileDetection, detect_cmyk_profile};
 pub use source::SourceColorKind;
 pub use source::{SourceKind, SourcePage, SourcePdf, open_pdf_source, sources_from_bytes};

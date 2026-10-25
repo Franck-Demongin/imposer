@@ -2,7 +2,7 @@ use crate::tui::run_imposition_work;
 
 type BusyReceiver = std::sync::mpsc::Receiver<(String, Option<std::path::PathBuf>)>;
 use imposer::compute_layout;
-use imposer::config::{ImpositionConfig, SheetOrientation, SheetSize};
+use imposer::config::{ImpositionConfig, SheetOrientation};
 use imposer::{ImposerError, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -57,7 +57,41 @@ pub fn run() -> Result<()> {
     );
     let _timer = timer;
 
-    // Source 1
+    let user_presets = imposer::presets::load_user_presets().unwrap_or_default();
+    let mut sheet_choices: Vec<(String, f32, f32)> = Vec::new();
+    for size in imposer::config::SheetSize::builtins() {
+        sheet_choices.push((size.name.clone(), size.width_mm, size.height_mm));
+    }
+    for preset in user_presets {
+        sheet_choices.push((preset.name, preset.width_mm, preset.height_mm));
+    }
+    sheet_choices.push(("Personnalisé".to_string(), 210.0, 297.0));
+    let sheet_choices_state = std::sync::Arc::new(std::sync::Mutex::new(sheet_choices.clone()));
+    let sheet_labels: Vec<slint::SharedString> = sheet_choices
+        .iter()
+        .map(|(name, _, _)| name.clone().into())
+        .collect();
+    ui.set_sheet_options(slint::ModelRc::new(std::rc::Rc::new(
+        slint::VecModel::from(sheet_labels),
+    )));
+    if let Some(first) = sheet_choices.first() {
+        let (name, width, height) = first;
+        ui.set_sheet_width_mm(format!("{:.1}", *width).into());
+        ui.set_sheet_height_mm(format!("{:.1}", *height).into());
+        ui.set_sheet_summary(
+            format!("{} ({:.1} x {:.1} cm)", name, *width / 10.0, *height / 10.0,).into(),
+        );
+    }
+    ui.set_custom_width_mm(format!("{:.1}", 210.0).into());
+    ui.set_custom_height_mm(format!("{:.1}", 297.0).into());
+    ui.set_previous_sheet_index(0);
+    ui.set_custom_open(false);
+    ui.set_custom_error("".into());
+    ui.set_save_open(false);
+    ui.set_preset_name_text("".into());
+    ui.set_preset_save_error("".into());
+    ui.set_sheet_index(0);
+
     {
         let weak = weak_ui.clone();
         ui.on_browse_source_one(move || {
@@ -150,6 +184,202 @@ pub fn run() -> Result<()> {
         });
     }
 
+    // Formats de feuilles personnalisés et préréglés
+    {
+        let weak = weak_ui.clone();
+        let state = sheet_choices_state.clone();
+        ui.on_sheet_selection_changed(move || {
+            let ui = match weak.upgrade() {
+                Some(ui) => ui,
+                None => return,
+            };
+            let index = ui.get_sheet_index();
+            if index < 0 {
+                return;
+            }
+            let data = {
+                let guard = state.lock().unwrap();
+                if index as usize >= guard.len() {
+                    return;
+                }
+                let is_custom = index as usize == guard.len().saturating_sub(1);
+                let choice = if is_custom {
+                    None
+                } else {
+                    Some(guard[index as usize].clone())
+                };
+                (is_custom, choice)
+            };
+            if data.0 {
+                let width = ui.get_sheet_width_mm().to_string();
+                let height = ui.get_sheet_height_mm().to_string();
+                ui.set_custom_width_mm(width.into());
+                ui.set_custom_height_mm(height.into());
+                ui.set_custom_error("".into());
+                ui.set_custom_open(true);
+            } else if let Some((name, width, height)) = data.1 {
+                ui.set_sheet_width_mm(format!("{:.1}", width).into());
+                ui.set_sheet_height_mm(format!("{:.1}", height).into());
+                ui.set_sheet_summary(
+                    format!("{} ({:.1} x {:.1} cm)", name, width / 10.0, height / 10.0).into(),
+                );
+                ui.set_previous_sheet_index(index);
+                ui.set_custom_open(false);
+            }
+        });
+    }
+    {
+        let weak = weak_ui.clone();
+        ui.on_custom_confirm(move || {
+            let ui = match weak.upgrade() {
+                Some(ui) => ui,
+                None => return,
+            };
+            let width = parse_slint_dimension(ui.get_custom_width_mm());
+            let height = parse_slint_dimension(ui.get_custom_height_mm());
+            match (width, height) {
+                (Some(width), Some(height)) => {
+                    ui.set_sheet_width_mm(format!("{:.1}", width).into());
+                    ui.set_sheet_height_mm(format!("{:.1}", height).into());
+                    ui.set_sheet_summary(
+                        format!(
+                            "Personnalisé ({:.1} x {:.1} cm)",
+                            width / 10.0,
+                            height / 10.0,
+                        )
+                        .into(),
+                    );
+                    ui.set_custom_error("".into());
+                    ui.set_custom_open(false);
+                }
+                _ => {
+                    ui.set_custom_error(
+                        "Dimensions invalides: valeurs numériques positives attendues.".into(),
+                    );
+                }
+            }
+        });
+    }
+    {
+        let weak = weak_ui.clone();
+        ui.on_custom_cancel(move || {
+            let ui = match weak.upgrade() {
+                Some(ui) => ui,
+                None => return,
+            };
+            ui.set_custom_open(false);
+            let previous = ui.get_previous_sheet_index();
+            ui.set_sheet_index(previous);
+        });
+    }
+    {
+        let weak = weak_ui.clone();
+        ui.on_save_preset_requested(move || {
+            let ui = match weak.upgrade() {
+                Some(ui) => ui,
+                None => return,
+            };
+            ui.set_preset_name_text(
+                format!(
+                    "Format {:.0}x{:.0}",
+                    parse_slint_dimension(ui.get_sheet_width_mm()).unwrap_or(210.0),
+                    parse_slint_dimension(ui.get_sheet_height_mm()).unwrap_or(297.0),
+                )
+                .into(),
+            );
+            ui.set_preset_save_error("".into());
+            ui.set_save_open(true);
+        });
+    }
+    {
+        let weak = weak_ui.clone();
+        let state = sheet_choices_state.clone();
+        ui.on_save_preset_confirm(move || {
+            let ui = match weak.upgrade() {
+                Some(ui) => ui,
+                None => return,
+            };
+            let width = match parse_slint_dimension(ui.get_sheet_width_mm()) {
+                Some(value) => value,
+                None => {
+                    ui.set_preset_save_error("Dimensions de feuille invalides.".into());
+                    return;
+                }
+            };
+            let height = match parse_slint_dimension(ui.get_sheet_height_mm()) {
+                Some(value) => value,
+                None => {
+                    ui.set_preset_save_error("Dimensions de feuille invalides.".into());
+                    return;
+                }
+            };
+            let name = ui.get_preset_name_text().to_string();
+            let builtins = imposer::config::SheetSize::builtins();
+            let existing = imposer::presets::load_user_presets().unwrap_or_default();
+            match imposer::presets::validate_user_preset(&name, width, height, &existing, &builtins)
+            {
+                Ok(user_preset) => {
+                    let mut updated = existing;
+                    updated.push(user_preset.clone());
+                    match imposer::presets::save_user_presets(&updated) {
+                        Ok(()) => {
+                            let mut rebuilt: Vec<(String, f32, f32)> = builtins
+                                .into_iter()
+                                .map(|preset| {
+                                    (preset.name.clone(), preset.width_mm, preset.height_mm)
+                                })
+                                .collect();
+                            for preset in &updated {
+                                rebuilt.push((
+                                    preset.name.clone(),
+                                    preset.width_mm,
+                                    preset.height_mm,
+                                ));
+                            }
+                            rebuilt.push(("Personnalisé".to_string(), 210.0, 297.0));
+                            {
+                                let mut guard = state.lock().unwrap();
+                                *guard = rebuilt.clone();
+                            }
+                            let labels: Vec<slint::SharedString> = rebuilt
+                                .iter()
+                                .map(|(name, _, _)| name.clone().into())
+                                .collect();
+                            ui.set_sheet_options(slint::ModelRc::new(std::rc::Rc::new(
+                                slint::VecModel::from(labels),
+                            )));
+                            let selected_index = (rebuilt.len() as i32 - 1 - 1).max(0);
+                            ui.set_sheet_width_mm(format!("{:.1}", width).into());
+                            ui.set_sheet_height_mm(format!("{:.1}", height).into());
+                            ui.set_sheet_summary(
+                                format!(
+                                    "{} ({:.1} x {:.1} cm)",
+                                    user_preset.name,
+                                    width / 10.0,
+                                    height / 10.0,
+                                )
+                                .into(),
+                            );
+                            ui.set_status(
+                                format!("Format enregistré: {}", user_preset.name,).into(),
+                            );
+                            ui.set_previous_sheet_index(selected_index);
+                            ui.set_custom_open(false);
+                            ui.set_save_open(false);
+                            ui.set_sheet_index(selected_index);
+                        }
+                        Err(error) => {
+                            ui.set_preset_save_error(error.into());
+                        }
+                    }
+                }
+                Err(error) => {
+                    ui.set_preset_save_error(error.into());
+                }
+            }
+        });
+    }
+
     // Génération
     {
         let weak = weak_ui.clone();
@@ -203,10 +433,19 @@ pub fn run() -> Result<()> {
                 return;
             }
 
-            let sheet = match ui.get_sheet_index() {
-                1 => SheetSize::A3,
-                2 => SheetSize::Sra3,
-                _ => SheetSize::A4,
+            let sheet_width_mm = match ui.get_sheet_width_mm().to_string().trim().parse::<f32>() {
+                Ok(value) if value.is_finite() && value > 0.0 => value,
+                _ => {
+                    ui.set_status("Dimensions de feuille invalides.".into());
+                    return;
+                }
+            };
+            let sheet_height_mm = match ui.get_sheet_height_mm().to_string().trim().parse::<f32>() {
+                Ok(value) if value.is_finite() && value > 0.0 => value,
+                _ => {
+                    ui.set_status("Dimensions de feuille invalides.".into());
+                    return;
+                }
             };
             let sheet_orientation = match ui.get_sheet_orientation_index() {
                 1 => SheetOrientation::Portrait,
@@ -237,7 +476,8 @@ pub fn run() -> Result<()> {
                 let status = run_imposition_work(
                     thread_paths,
                     destination,
-                    sheet,
+                    sheet_width_mm,
+                    sheet_height_mm,
                     sheet_orientation,
                     rotate_verso,
                     bleed,
@@ -315,11 +555,25 @@ fn current_preview_source(ui: &AppWindow) -> Option<String> {
 }
 
 fn config_from_ui(ui: &AppWindow) -> Option<ImpositionConfig> {
-    let sheet = match ui.get_sheet_index() {
-        1 => SheetSize::A3,
-        2 => SheetSize::Sra3,
-        _ => SheetSize::A4,
-    };
+    let sheet_width_mm = ui
+        .get_sheet_width_mm()
+        .to_string()
+        .trim()
+        .parse::<f32>()
+        .ok()?;
+    let sheet_height_mm = ui
+        .get_sheet_height_mm()
+        .to_string()
+        .trim()
+        .parse::<f32>()
+        .ok()?;
+    if !sheet_width_mm.is_finite()
+        || sheet_width_mm <= 0.0
+        || !sheet_height_mm.is_finite()
+        || sheet_height_mm <= 0.0
+    {
+        return None;
+    }
     let sheet_orientation = match ui.get_sheet_orientation_index() {
         1 => SheetOrientation::Portrait,
         2 => SheetOrientation::Landscape,
@@ -337,7 +591,8 @@ fn config_from_ui(ui: &AppWindow) -> Option<ImpositionConfig> {
         return None;
     }
     Some(ImpositionConfig {
-        sheet_size: sheet,
+        sheet_width_mm,
+        sheet_height_mm,
         sheet_orientation,
         bleed_mm: bleed,
         safety_margin_mm: safety,
@@ -469,4 +724,18 @@ fn output_path(output_dir: &str, raw_name: &str) -> Option<PathBuf> {
         name.push_str(".pdf");
     }
     Some(PathBuf::from(directory).join(name))
+}
+
+fn parse_slint_dimension(text: slint::SharedString) -> Option<f32> {
+    let value = text
+        .to_string()
+        .replace(',', ".")
+        .trim()
+        .parse::<f32>()
+        .ok()?;
+    if value.is_finite() && value > 0.0 {
+        Some(value)
+    } else {
+        None
+    }
 }

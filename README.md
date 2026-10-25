@@ -127,6 +127,20 @@ défaut comme recto, de retirer la dernière source avec `Suppr`, et d'ajuster l
 options avant l'exécution. Un seul PDF peut fournir ses deux pages ; avec
 plusieurs sources, seule la première page de chaque PDF est utilisée.
 
+La liste des formats contient les tailles intégrées (`A4`, `A3`, `SRA3`),
+verrouillées, puis l'entrée `Personnalisé`. Choisir cette entrée ouvre une
+pop-up pour saisir la largeur et la hauteur en millimètres ; les flèches
+`Tab`, `Left`, `Right`, `Home` et `End` et `Enter` permettent d'éditer et de
+valider, tandis qu'`Esc` annule en restaurant les dimensions précédentes. Une
+action discrète « Sauvegarder ce format » ouvre une pop-up demandant un nom, puis
+enregistre le format dans les préférences utilisateur. Les formats enregistrés sont
+rechargés au prochain lancement et apparaissent à côté des formats intégrés. Le
+format actif est rappelé dans la ligne « Feuille - A4 (21.0 x 29.7 cm) » et dans
+le récapitulatif. Les préréglés sont stockés en TOML, par exemple
+`~/.config/imposer/presets.toml` sur Linux/macOS et `%APPDATA%/imposer/presets.toml`
+sur Windows ; les noms vides, trop longs ou déjà utilisés (formats intégrés
+inclus) sont refusés.
+
 
 ## Interface graphique optionnelle (Slint)
 
@@ -206,10 +220,11 @@ Recto/verso à partir de deux fichiers :
   --sheet sra3
 ```
 
-Options principales : `--sheet` (`a4`, `a3`, `sra3`), `--sheet-orientation`
-(`auto`, `portrait`, `landscape`), `--rotate-verso` (force a 180° rotation of
-verso sheets, default false), `--bleed` (mm), `--safety-margin` (mm),
-`--no-rotate-copies`, `--tui`.
+Options principales : `--sheet` (`a4`, `a3`, `sra3`), `--sheet-width-mm` et
+`--sheet-height-mm` (dimensions personnalisées en millimètres, utilisées
+ensemble), `--sheet-orientation` (`auto`, `portrait`, `landscape`),
+`--rotate-verso` (force a 180° rotation of verso sheets, default false),
+`--bleed` (mm), `--safety-margin` (mm), `--no-rotate-copies`, `--tui`.
 
 Les sources CMYK conservent leur profil ICC et, si tous les profils sont
 compatibles, les métadonnées PDF/X-4. Les sources RVB sont écrites en

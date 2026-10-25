@@ -1,4 +1,4 @@
-use imposer::config::{SheetOrientation, SheetSize};
+use imposer::config::SheetOrientation;
 use imposer::source::SourceColorKind;
 use imposer::{ImpositionConfig, impose, impose_sources, sources_from_bytes};
 use lopdf::Document;
@@ -12,7 +12,8 @@ fn load(name: &str) -> Vec<u8> {
 fn one_page_output() {
     let input = load("sample_1page.pdf");
     let cfg = ImpositionConfig {
-        sheet_size: SheetSize::A4,
+        sheet_width_mm: 210.0,
+        sheet_height_mm: 297.0,
         sheet_orientation: SheetOrientation::Auto,
         bleed_mm: 2.0,
         safety_margin_mm: 5.0,
@@ -37,7 +38,8 @@ fn one_page_output() {
 fn two_page_output() {
     let input = load("sample_2page.pdf");
     let cfg = ImpositionConfig {
-        sheet_size: SheetSize::Sra3,
+        sheet_width_mm: 320.0,
+        sheet_height_mm: 450.0,
         sheet_orientation: SheetOrientation::Auto,
         bleed_mm: 2.0,
         safety_margin_mm: 5.0,
@@ -54,7 +56,8 @@ fn two_page_output() {
 fn output_intent_propagated() {
     let input = load("sample_1page.pdf");
     let cfg = ImpositionConfig {
-        sheet_size: SheetSize::A4,
+        sheet_width_mm: 210.0,
+        sheet_height_mm: 297.0,
         sheet_orientation: SheetOrientation::Auto,
         bleed_mm: 2.0,
         safety_margin_mm: 5.0,
@@ -87,7 +90,8 @@ fn png_one_page_output() {
         .unwrap();
     let sources = sources_from_bytes(&[png]).unwrap();
     let cfg = ImpositionConfig {
-        sheet_size: SheetSize::A4,
+        sheet_width_mm: 210.0,
+        sheet_height_mm: 297.0,
         sheet_orientation: SheetOrientation::Auto,
         bleed_mm: 2.0,
         safety_margin_mm: 5.0,
@@ -117,7 +121,8 @@ fn jpeg_two_page_output() {
     }
     let sources = sources_from_bytes(&inputs).unwrap();
     let cfg = ImpositionConfig {
-        sheet_size: SheetSize::Sra3,
+        sheet_width_mm: 320.0,
+        sheet_height_mm: 450.0,
         sheet_orientation: SheetOrientation::Auto,
         bleed_mm: 2.0,
         safety_margin_mm: 5.0,
@@ -214,7 +219,8 @@ fn psd_cmyk_single_page_output() {
     );
 
     let cfg = ImpositionConfig {
-        sheet_size: SheetSize::A4,
+        sheet_width_mm: 210.0,
+        sheet_height_mm: 297.0,
         sheet_orientation: SheetOrientation::Auto,
         bleed_mm: 2.0,
         safety_margin_mm: 5.0,
@@ -256,7 +262,7 @@ fn image_magick_psd_extraction_preserves_cmyk() {
 
 #[test]
 fn generated_pdfx4_output_preflight_is_clean() {
-    use imposer::config::{SheetOrientation, SheetSize};
+    use imposer::config::SheetOrientation;
     use imposer::{ImpositionConfig, generate, preflight_output, sources_from_bytes};
 
     let gs = if cfg!(target_os = "windows") {
@@ -275,7 +281,8 @@ fn generated_pdfx4_output_preflight_is_clean() {
     let input = load("sample_1page.pdf");
     let sources = sources_from_bytes(&[input]).unwrap();
     let cfg = ImpositionConfig {
-        sheet_size: SheetSize::A4,
+        sheet_width_mm: 210.0,
+        sheet_height_mm: 297.0,
         sheet_orientation: SheetOrientation::Auto,
         bleed_mm: 2.0,
         safety_margin_mm: 5.0,

@@ -6,7 +6,7 @@ use crossterm::execute;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
-use imposer::config::{ImpositionConfig, SheetOrientation, SheetSize};
+use imposer::config::{ImpositionConfig, SheetOrientation, SheetPreset, SheetSize};
 
 use imposer::{ImposerError, Result, SourcePage, generate, read_source_pages, sources_from_bytes};
 use ratatui::Terminal;
@@ -38,11 +38,14 @@ enum Focus {
     Run,
 }
 
-const OPTION_COUNT: usize = 6;
+const OPTION_COUNT: usize = 7;
 
 #[derive(Clone)]
 struct OptionsState {
-    sheet: SheetSize,
+    sheet_presets: Vec<SheetPreset>,
+    selected_sheet: usize,
+    sheet_width_mm: f32,
+    sheet_height_mm: f32,
     sheet_orientation: SheetOrientation,
     rotate_verso: bool,
     bleed: f32,
@@ -52,8 +55,12 @@ struct OptionsState {
 
 impl Default for OptionsState {
     fn default() -> Self {
+        let builtins = SheetSize::builtins();
         Self {
-            sheet: SheetSize::A4,
+            sheet_presets: builtins,
+            selected_sheet: 0,
+            sheet_width_mm: 210.0,
+            sheet_height_mm: 297.0,
             sheet_orientation: SheetOrientation::Auto,
             rotate_verso: false,
             bleed: 2.0,
@@ -61,6 +68,26 @@ impl Default for OptionsState {
             rotate: true,
         }
     }
+}
+
+#[derive(Clone)]
+struct CustomPopup {
+    width_text: String,
+    width_cursor: usize,
+    height_text: String,
+    height_cursor: usize,
+    active: usize,
+    previous_selected_sheet: usize,
+    previous_width_mm: f32,
+    previous_height_mm: f32,
+    error: Option<String>,
+}
+
+#[derive(Clone)]
+struct SavePresetPopup {
+    name: String,
+    cursor: usize,
+    error: Option<String>,
 }
 
 struct Browser {
@@ -135,7 +162,8 @@ impl Browser {
 struct PendingRun {
     destination: PathBuf,
     source_paths: Vec<PathBuf>,
-    sheet: SheetSize,
+    sheet_width_mm: f32,
+    sheet_height_mm: f32,
     sheet_orientation: SheetOrientation,
     rotate_verso: bool,
     bleed: f32,
@@ -160,6 +188,8 @@ struct App {
     busy_frame: usize,
     busy_rx: Option<mpsc::Receiver<String>>,
     create_dir_popup: Option<PathBuf>,
+    custom_popup: Option<CustomPopup>,
+    save_popup: Option<SavePresetPopup>,
     pending_generation: Option<PendingRun>,
 }
 
@@ -195,7 +225,7 @@ fn delete_at(text: &mut String, cursor: &mut usize) {
 
 impl App {
     fn new() -> Self {
-        Self {
+        let mut app = Self {
             browser: Browser::new(),
             sources: Vec::new(),
             output_dir: String::new(),
@@ -214,8 +244,31 @@ impl App {
             busy_frame: 0,
             busy_rx: None,
             create_dir_popup: None,
+            custom_popup: None,
+            save_popup: None,
             pending_generation: None,
+        };
+        match imposer::presets::load_user_presets() {
+            Ok(user_presets) => {
+                let mut presets = SheetSize::builtins();
+                for preset in user_presets {
+                    presets.push(SheetPreset {
+                        name: preset.name,
+                        width_mm: preset.width_mm,
+                        height_mm: preset.height_mm,
+                        builtin: false,
+                        editable: false,
+                    });
+                }
+                app.options.sheet_presets = presets;
+                if let Some(selected) = app.options.sheet_presets.get(app.options.selected_sheet) {
+                    app.options.sheet_width_mm = selected.width_mm;
+                    app.options.sheet_height_mm = selected.height_mm;
+                }
+            }
+            Err(error) => app.status = error,
         }
+        app
     }
 
     fn next_focus(&mut self) {
@@ -240,6 +293,16 @@ impl App {
 
     fn handle_key(&mut self, key: KeyEvent) {
         if key.kind != KeyEventKind::Press {
+            return;
+        }
+
+        // Pop-ups personnalisées : interceptent toutes les touches.
+        if self.custom_popup.is_some() {
+            self.handle_custom_popup_key(key);
+            return;
+        }
+        if self.save_popup.is_some() {
+            self.handle_save_popup_key(key);
             return;
         }
 
@@ -499,6 +562,9 @@ impl App {
             KeyCode::Right | KeyCode::Char('+') | KeyCode::Char(']') => {
                 self.change_option(1);
             }
+            KeyCode::Enter | KeyCode::Char(' ') if self.selected_option == 6 => {
+                self.open_save_preset_popup();
+            }
             KeyCode::Enter | KeyCode::Char(' ') => {
                 self.change_option(1);
             }
@@ -531,13 +597,19 @@ impl App {
     fn change_option(&mut self, delta: i32) {
         match self.selected_option {
             0 => {
-                let values = [SheetSize::A4, SheetSize::A3, SheetSize::Sra3];
-                let idx = values
-                    .iter()
-                    .position(|v| *v == self.options.sheet)
-                    .unwrap_or(0);
-                let next = (idx as i32 + delta).rem_euclid(values.len() as i32) as usize;
-                self.options.sheet = values[next];
+                let preset_count = self.options.sheet_presets.len();
+                let total = preset_count + 1;
+                let next =
+                    (self.options.selected_sheet as i32 + delta).rem_euclid(total as i32) as usize;
+                self.options.selected_sheet = next;
+                if next < preset_count {
+                    if let Some(preset) = self.options.sheet_presets.get(next) {
+                        self.options.sheet_width_mm = preset.width_mm;
+                        self.options.sheet_height_mm = preset.height_mm;
+                    }
+                } else if self.custom_popup.is_none() {
+                    self.open_custom_popup();
+                }
             }
             1 => {
                 let values = [
@@ -565,6 +637,284 @@ impl App {
             }
             5 if delta != 0 => {
                 self.options.rotate = !self.options.rotate;
+            }
+            6 => {
+                self.open_save_preset_popup();
+            }
+            _ => {}
+        }
+    }
+
+    fn user_presets(&self) -> Vec<imposer::UserPreset> {
+        self.options
+            .sheet_presets
+            .iter()
+            .filter(|preset| !preset.builtin)
+            .map(|preset| imposer::UserPreset {
+                name: preset.name.clone(),
+                width_mm: preset.width_mm,
+                height_mm: preset.height_mm,
+            })
+            .collect()
+    }
+
+    fn open_custom_popup(&mut self) {
+        let popup = CustomPopup {
+            width_text: format!("{:.1}", self.options.sheet_width_mm),
+            width_cursor: format!("{:.1}", self.options.sheet_width_mm)
+                .chars()
+                .count(),
+            height_text: format!("{:.1}", self.options.sheet_height_mm),
+            height_cursor: format!("{:.1}", self.options.sheet_height_mm)
+                .chars()
+                .count(),
+            active: 0,
+            previous_selected_sheet: if self.options.selected_sheet
+                < self.options.sheet_presets.len()
+            {
+                self.options.selected_sheet
+            } else {
+                self.options
+                    .selected_sheet
+                    .min(self.options.sheet_presets.len().saturating_sub(1))
+            },
+            previous_width_mm: self.options.sheet_width_mm,
+            previous_height_mm: self.options.sheet_height_mm,
+            error: None,
+        };
+        self.custom_popup = Some(popup);
+        self.status =
+            String::from("Saisissez les dimensions du format personnalisé (mm), puis Entrée.");
+    }
+
+    fn cancel_custom_popup(&mut self) {
+        if let Some(popup) = self.custom_popup.take() {
+            self.options.selected_sheet = popup.previous_selected_sheet;
+            self.options.sheet_width_mm = popup.previous_width_mm;
+            self.options.sheet_height_mm = popup.previous_height_mm;
+        }
+        self.status = String::from("Saisie des dimensions annulée.");
+    }
+
+    fn apply_custom_popup(&mut self) {
+        let Some(popup) = self.custom_popup.take() else {
+            return;
+        };
+        fn parse_dimension(value: &str) -> Option<f32> {
+            value.replace(',', ".").trim().parse::<f32>().ok()
+        }
+        let (width, height) = match (
+            parse_dimension(&popup.width_text),
+            parse_dimension(&popup.height_text),
+        ) {
+            (Some(width), Some(height))
+                if width.is_finite() && height.is_finite() && width > 0.0 && height > 0.0 =>
+            {
+                (width, height)
+            }
+            _ => {
+                let mut popup = popup;
+                popup.error = Some(String::from(
+                    "Dimensions invalides: valeurs numériques positives attendues.",
+                ));
+                self.custom_popup = Some(popup);
+                self.status = String::from("Dimensions personnalisées invalides.");
+                return;
+            }
+        };
+        self.options.sheet_width_mm = width;
+        self.options.sheet_height_mm = height;
+        self.options.selected_sheet = self.options.sheet_presets.len();
+        self.status = format!("Format personnalisé: {:.1} x {:.1} mm", width, height);
+    }
+
+    fn open_save_preset_popup(&mut self) {
+        let popup = SavePresetPopup {
+            name: format!(
+                "Format {:.0}x{:.0}",
+                self.options.sheet_width_mm, self.options.sheet_height_mm
+            ),
+            cursor: 0,
+            error: None,
+        };
+        self.save_popup = Some(popup);
+        self.status = String::from("Saisissez le nom du format, puis Entrée pour enregistrer.");
+    }
+
+    fn cancel_save_preset_popup(&mut self) {
+        self.save_popup = None;
+        self.status = String::from("Enregistrement du format annulé.");
+    }
+
+    fn apply_save_preset_popup(&mut self) {
+        let popup = self.save_popup.take().expect("save popup");
+        let name = popup.name.trim();
+        let width = self.options.sheet_width_mm;
+        let height = self.options.sheet_height_mm;
+        let existing = self.user_presets();
+        let builtins = SheetSize::builtins();
+        match imposer::presets::validate_user_preset(name, width, height, &existing, &builtins) {
+            Ok(user_preset) => {
+                let mut all_presets = existing;
+                all_presets.push(user_preset.clone());
+                if let Err(error) = imposer::presets::save_user_presets(&all_presets) {
+                    let mut popup = popup;
+                    popup.error = Some(error.clone());
+                    self.save_popup = Some(popup);
+                    self.status = error;
+                    return;
+                }
+                self.options.sheet_presets.push(SheetPreset {
+                    name: user_preset.name.clone(),
+                    width_mm: user_preset.width_mm,
+                    height_mm: user_preset.height_mm,
+                    builtin: false,
+                    editable: false,
+                });
+                self.options.selected_sheet = self.options.sheet_presets.len() - 1;
+                self.options.sheet_width_mm = user_preset.width_mm;
+                self.options.sheet_height_mm = user_preset.height_mm;
+                self.save_popup = None;
+                self.status = format!("Format enregistré: {}", user_preset.name);
+            }
+            Err(error) => {
+                let mut popup = popup;
+                popup.error = Some(error.clone());
+                self.save_popup = Some(popup);
+                self.status = error;
+            }
+        }
+    }
+
+    fn handle_custom_popup_key(&mut self, key: KeyEvent) {
+        let Some(popup) = self.custom_popup.as_mut() else {
+            return;
+        };
+        match key.code {
+            KeyCode::Esc => {
+                let _ = popup;
+                self.cancel_custom_popup();
+            }
+            KeyCode::Tab | KeyCode::Down | KeyCode::Up => {
+                popup.active = if popup.active == 0 { 1 } else { 0 };
+            }
+            KeyCode::Enter => {
+                let _ = popup;
+                self.apply_custom_popup();
+            }
+            KeyCode::Left => {
+                let active = popup.active;
+                if active == 0 {
+                    if popup.width_cursor > 0 {
+                        popup.width_cursor -= 1;
+                    }
+                } else if popup.height_cursor > 0 {
+                    popup.height_cursor -= 1;
+                }
+            }
+            KeyCode::Right => {
+                let active = popup.active;
+                if active == 0 {
+                    let count = popup.width_text.chars().count();
+                    if popup.width_cursor < count {
+                        popup.width_cursor += 1;
+                    }
+                } else {
+                    let count = popup.height_text.chars().count();
+                    if popup.height_cursor < count {
+                        popup.height_cursor += 1;
+                    }
+                }
+            }
+            KeyCode::Home => {
+                if popup.active == 0 {
+                    popup.width_cursor = 0;
+                } else {
+                    popup.height_cursor = 0;
+                }
+            }
+            KeyCode::End => {
+                if popup.active == 0 {
+                    popup.width_cursor = popup.width_text.chars().count();
+                } else {
+                    popup.height_cursor = popup.height_text.chars().count();
+                }
+            }
+            KeyCode::Backspace => {
+                if popup.active == 0 {
+                    backspace_at(&mut popup.width_text, &mut popup.width_cursor);
+                } else {
+                    backspace_at(&mut popup.height_text, &mut popup.height_cursor);
+                }
+                popup.error = None;
+            }
+            KeyCode::Delete => {
+                if popup.active == 0 {
+                    delete_at(&mut popup.width_text, &mut popup.width_cursor);
+                } else {
+                    delete_at(&mut popup.height_text, &mut popup.height_cursor);
+                }
+                popup.error = None;
+            }
+            KeyCode::Char(c)
+                if (key.modifiers.is_empty() || key.modifiers.contains(KeyModifiers::SHIFT))
+                    && (c.is_ascii_digit() || c == '.' || c == ',') =>
+            {
+                if popup.active == 0 {
+                    insert_char_at(&mut popup.width_text, &mut popup.width_cursor, c);
+                } else {
+                    insert_char_at(&mut popup.height_text, &mut popup.height_cursor, c);
+                }
+                popup.error = None;
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_save_popup_key(&mut self, key: KeyEvent) {
+        let Some(popup) = self.save_popup.as_mut() else {
+            return;
+        };
+        match key.code {
+            KeyCode::Esc => {
+                let _ = popup;
+                self.cancel_save_preset_popup();
+            }
+            KeyCode::Enter => {
+                let _ = popup;
+                self.apply_save_preset_popup();
+            }
+            KeyCode::Left => {
+                if popup.cursor > 0 {
+                    popup.cursor -= 1;
+                }
+            }
+            KeyCode::Right => {
+                let count = popup.name.chars().count();
+                if popup.cursor < count {
+                    popup.cursor += 1;
+                }
+            }
+            KeyCode::Home => {
+                popup.cursor = 0;
+            }
+            KeyCode::End => {
+                popup.cursor = popup.name.chars().count();
+            }
+            KeyCode::Backspace => {
+                backspace_at(&mut popup.name, &mut popup.cursor);
+                popup.error = None;
+            }
+            KeyCode::Delete => {
+                delete_at(&mut popup.name, &mut popup.cursor);
+                popup.error = None;
+            }
+            KeyCode::Char(c)
+                if !key.modifiers.contains(KeyModifiers::CONTROL)
+                    && !key.modifiers.contains(KeyModifiers::ALT) =>
+            {
+                insert_char_at(&mut popup.name, &mut popup.cursor, c);
+                popup.error = None;
             }
             _ => {}
         }
@@ -598,7 +948,8 @@ impl App {
 
         let destination = run.destination;
         let source_paths = run.source_paths;
-        let sheet = run.sheet;
+        let sheet_width_mm = run.sheet_width_mm;
+        let sheet_height_mm = run.sheet_height_mm;
         let sheet_orientation = run.sheet_orientation;
         let rotate_verso = run.rotate_verso;
         let bleed = run.bleed;
@@ -614,7 +965,8 @@ impl App {
             let status = run_imposition_work(
                 source_paths,
                 destination,
-                sheet,
+                sheet_width_mm,
+                sheet_height_mm,
                 sheet_orientation,
                 rotate_verso,
                 bleed,
@@ -645,7 +997,8 @@ impl App {
         let run = PendingRun {
             destination: destination.clone(),
             source_paths: self.sources.clone(),
-            sheet: self.options.sheet,
+            sheet_width_mm: self.options.sheet_width_mm,
+            sheet_height_mm: self.options.sheet_height_mm,
             sheet_orientation: self.options.sheet_orientation,
             rotate_verso: self.options.rotate_verso,
             bleed: self.options.bleed,
@@ -680,7 +1033,11 @@ impl App {
         if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
             return;
         }
-        if self.busy || self.create_dir_popup.is_some() {
+        if self.busy
+            || self.create_dir_popup.is_some()
+            || self.custom_popup.is_some()
+            || self.save_popup.is_some()
+        {
             return;
         }
         if let Some(rect) = self.run_button_rect
@@ -760,8 +1117,21 @@ impl App {
         }
         f.render_stateful_widget(browser_list, main[0], &mut browser_state);
 
+        let current_sheet_name = if self.options.selected_sheet < self.options.sheet_presets.len() {
+            self.options.sheet_presets[self.options.selected_sheet]
+                .name
+                .clone()
+        } else {
+            String::from("Personnalisé")
+        };
+        let sheet_line = format!(
+            "Feuille - {} ({:.1} x {:.1} cm)",
+            current_sheet_name,
+            self.options.sheet_width_mm / 10.0,
+            self.options.sheet_height_mm / 10.0
+        );
+        let mut option_items: Vec<ListItem> = vec![ListItem::new(sheet_line)];
         let option_rows = [
-            ("Feuille", sheet_name(self.options.sheet).to_string()),
             (
                 "Orientation feuille",
                 sheet_orientation_name(self.options.sheet_orientation).to_string(),
@@ -785,10 +1155,15 @@ impl App {
                 },
             ),
         ];
-        let option_items: Vec<ListItem> = option_rows
-            .iter()
-            .map(|(label, value)| ListItem::new(format!("{:<24} : {}", label, value)))
-            .collect();
+        option_items.extend(
+            option_rows
+                .iter()
+                .map(|(label, value)| ListItem::new(format!("{:<24} : {}", label, value))),
+        );
+        // Option Sauvegarder row.
+        option_items.push(ListItem::new(String::from(
+            "Sauvegarder ce format : Entrée pour sauvegarder le format actuel",
+        )));
         let options_list = List::new(option_items)
             .block(
                 Block::default()
@@ -878,6 +1253,94 @@ impl App {
         };
         f.render_widget(button, button_area);
         self.run_button_rect = Some(button_area);
+
+        // Pop-up de saisie des dimensions personnalisées.
+        if let Some(popup) = self.custom_popup.clone() {
+            let popup_area = centered_rect(70, 14, f.area());
+            f.render_widget(Clear, popup_area);
+            let rows = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(3),
+                    Constraint::Length(3),
+                    Constraint::Length(3),
+                    Constraint::Length(2),
+                    Constraint::Length(2),
+                    Constraint::Length(3),
+                ])
+                .split(popup_area);
+            f.render_widget(
+                Paragraph::new("Format personnalisé (mm)")
+                    .alignment(Alignment::Center)
+                    .block(Block::default().borders(Borders::ALL).title("Dimensions")),
+                rows[0],
+            );
+            render_text_field(
+                f,
+                rows[1],
+                "Largeur",
+                &popup.width_text,
+                popup.width_cursor,
+                popup.active == 0,
+            );
+            render_text_field(
+                f,
+                rows[2],
+                "Hauteur",
+                &popup.height_text,
+                popup.height_cursor,
+                popup.active == 1,
+            );
+            let error = popup.error.clone().unwrap_or_else(|| {
+                String::from("Tab/↑↓ change le champ; Entrée valide; Échap annule.")
+            });
+            f.render_widget(
+                Paragraph::new(error)
+                    .wrap(ratatui::widgets::Wrap { trim: true })
+                    .alignment(Alignment::Center),
+                rows[3],
+            );
+        }
+
+        // Pop-up d'enregistrement d'un format.
+        if let Some(popup) = self.save_popup.clone() {
+            let popup_area = centered_rect(60, 11, f.area());
+            f.render_widget(Clear, popup_area);
+            let rows = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(3),
+                    Constraint::Length(3),
+                    Constraint::Length(2),
+                    Constraint::Length(2),
+                    Constraint::Length(3),
+                ])
+                .split(popup_area);
+            f.render_widget(
+                Paragraph::new(format!(
+                    "Enregistrer {} x {} mm",
+                    self.options.sheet_width_mm, self.options.sheet_height_mm
+                ))
+                .alignment(Alignment::Center)
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title("Nouveau format"),
+                ),
+                rows[0],
+            );
+            render_text_field(f, rows[1], "Nom", &popup.name, popup.cursor, true);
+            let error = popup
+                .error
+                .clone()
+                .unwrap_or_else(|| String::from("Entrée enregistre; Échap annule."));
+            f.render_widget(
+                Paragraph::new(error)
+                    .wrap(ratatui::widgets::Wrap { trim: true })
+                    .alignment(Alignment::Center),
+                rows[2],
+            );
+        }
 
         // Pop-up de confirmation de création du dossier de sortie.
         if let Some(dir) = &self.create_dir_popup {
@@ -985,7 +1448,8 @@ fn render_text_field(
 pub fn run_imposition_work(
     source_paths: Vec<PathBuf>,
     destination: PathBuf,
-    sheet: SheetSize,
+    sheet_width_mm: f32,
+    sheet_height_mm: f32,
     sheet_orientation: SheetOrientation,
     rotate_verso: bool,
     bleed: f32,
@@ -998,7 +1462,8 @@ pub fn run_imposition_work(
     };
 
     let config = ImpositionConfig {
-        sheet_size: sheet,
+        sheet_width_mm,
+        sheet_height_mm,
         sheet_orientation,
         bleed_mm: bleed,
         safety_margin_mm: safety,
@@ -1026,14 +1491,6 @@ pub fn run_imposition_work(
             ImposerError::Io(err) => format!("Erreur écriture : {err}"),
             other => format!("Erreur : {other}"),
         },
-    }
-}
-
-fn sheet_name(v: SheetSize) -> &'static str {
-    match v {
-        SheetSize::A4 => "A4",
-        SheetSize::A3 => "A3",
-        SheetSize::Sra3 => "SRA3",
     }
 }
 

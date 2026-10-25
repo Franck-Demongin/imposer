@@ -29,7 +29,8 @@ pub fn compute_layout(
     source_h: f32,
     config: &ImpositionConfig,
 ) -> Result<LayoutPlan, ImposerError> {
-    let (base_w_mm, base_h_mm) = config.sheet_size.dimensions_mm();
+    let base_w_mm = config.sheet_width_mm;
+    let base_h_mm = config.sheet_height_mm;
     let base_w = mm_to_pt(base_w_mm);
     let base_h = mm_to_pt(base_h_mm);
 
@@ -159,12 +160,13 @@ pub fn compute_layout(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{ImpositionConfig, SheetOrientation, SheetSize};
+    use crate::config::{ImpositionConfig, SheetOrientation};
 
     #[test]
     fn layout_produces_pages() {
         let cfg = ImpositionConfig {
-            sheet_size: SheetSize::A4,
+            sheet_width_mm: 210.0,
+            sheet_height_mm: 297.0,
             sheet_orientation: SheetOrientation::Auto,
             bleed_mm: 2.0,
             safety_margin_mm: 5.0,

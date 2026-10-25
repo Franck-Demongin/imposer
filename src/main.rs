@@ -21,6 +21,12 @@ struct Cli {
     #[arg(long, value_enum, default_value = "a4")]
     sheet: imposer::config::SheetSize,
 
+    #[arg(long)]
+    sheet_width_mm: Option<f32>,
+
+    #[arg(long)]
+    sheet_height_mm: Option<f32>,
+
     #[arg(long, value_enum, default_value = "auto")]
     sheet_orientation: imposer::config::SheetOrientation,
 
@@ -76,8 +82,20 @@ fn main() {
 
     let color_report: Vec<String> = sources.iter().map(SourcePage::color_label).collect();
     println!("Profils couleur détectés : {}", color_report.join(" ; "));
+    let (sheet_width_mm, sheet_height_mm) = match (cli.sheet_width_mm, cli.sheet_height_mm) {
+        (Some(width), Some(height)) => (width, height),
+        (Some(_), None) | (None, Some(_)) => {
+            eprintln!(
+                "erreur : --sheet-width-mm et --sheet-height-mm doivent être fournis ensemble"
+            );
+            std::process::exit(1);
+        }
+        (None, None) => cli.sheet.dimensions_mm(),
+    };
+
     let config = ImposeOptions {
-        sheet_size: cli.sheet,
+        sheet_width_mm,
+        sheet_height_mm,
         sheet_orientation: cli.sheet_orientation,
         bleed_mm: cli.bleed,
         safety_margin_mm: cli.safety_margin,

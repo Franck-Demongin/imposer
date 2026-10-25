@@ -65,6 +65,21 @@ export component AppWindow inherits Window {
     in-out property <string> safety-text: "5.0";
     in-out property <bool> rotate-copies: true;
 
+    in property <[string]> sheet-options: ["A4", "A3", "SRA3", "Personnalisé"];
+    in-out property <int> previous-sheet-index: 0;
+    in-out property <string> sheet-width-mm: "210.0";
+    in-out property <string> sheet-height-mm: "297.0";
+    in property <string> sheet-summary: "A4 (21,0 x 29,7 cm)";
+
+    in-out property <bool> custom-open: false;
+    in-out property <string> custom-width-mm: "210.0";
+    in-out property <string> custom-height-mm: "297.0";
+    in-out property <string> custom-error: "";
+
+    in-out property <bool> save-open: false;
+    in-out property <string> preset-name-text: "";
+    in-out property <string> preset-save-error: "";
+
     in property <float> preview-width: 0;
     in property <float> preview-height: 0;
     in property <[PreviewPlacement]> preview-placements: [];
@@ -80,6 +95,11 @@ export component AppWindow inherits Window {
     callback open-output-file();
     callback open-output-folder();
     callback refresh-preview();
+    callback sheet-selection-changed();
+    callback custom-confirm();
+    callback custom-cancel();
+    callback save-preset-requested();
+    callback save-preset-confirm();
 
     VerticalLayout {
         padding: Theme.spacing-m;
@@ -147,9 +167,19 @@ export component AppWindow inherits Window {
                             Text { text: "Orientation feuille"; row: 0; col: 1; }
 
                             ComboBox {
-                                model: ["A4", "A3", "SRA3"];
+                                model: root.sheet-options;
                                 current-index <=> root.sheet-index;
                                 row: 1; col: 0; horizontal-stretch: 1;
+                            }
+                            Text {
+                                text: root.sheet-summary;
+                                row: 1; col: 2; font-size: Theme.font-small;
+                            }
+                            Button {
+                                text: "Sauvegarder ce format";
+                                row: 2; col: 0; enabled: !root.busy;
+                                min-width: 130px; min-height: 30px;
+                                clicked => { root.save-preset-requested(); }
                             }
                             ComboBox {
                                 model: ["Auto", "Portrait", "Paysage"];
@@ -215,7 +245,7 @@ export component AppWindow inherits Window {
                             Text { text: "Source 2 : " + (root.source-2 == "" ? "(aucune)" : root.source-2); wrap: no-wrap; overflow: elide; font-size: Theme.font-small; color: Palette.alternate-foreground; }
                             Text { text: "Dossier : " + (root.output-dir == "" ? "(non défini)" : root.output-dir); wrap: no-wrap; overflow: elide; font-size: Theme.font-small; color: Palette.alternate-foreground; }
                             Text { text: "Fichier : " + (root.output-name == "" ? "(non défini)" : root.output-name); wrap: no-wrap; overflow: elide; font-size: Theme.font-small; color: Palette.alternate-foreground; }
-                            Text { text: "Feuille : " + (root.sheet-index == 0 ? "A4" : (root.sheet-index == 1 ? "A3" : "SRA3")); font-size: Theme.font-small; color: Palette.alternate-foreground; }
+                            Text { text: "Feuille : " + root.sheet-summary; font-size: Theme.font-small; color: Palette.alternate-foreground; }
                             Text { text: "Orientation feuille : " + (root.sheet-orientation-index == 0 ? "Auto" : (root.sheet-orientation-index == 1 ? "Portrait" : "Paysage")); font-size: Theme.font-small; color: Palette.alternate-foreground; }
                             Text { text: "Rotation des versos : " + (root.rotate-verso ? "Oui" : "Non"); font-size: Theme.font-small; color: Palette.alternate-foreground; }
                             Text { text: "Bord perdu : " + root.bleed-text + " mm"; font-size: Theme.font-small; color: Palette.alternate-foreground; }
@@ -265,6 +295,104 @@ export component AppWindow inherits Window {
             }
         }
 
+
+        if root.custom-open: Rectangle {
+            width: 100%;
+            height: 100%;
+            background: Palette.background.transparentize(0);
+            Rectangle {
+                width: 420px;
+                height: 260px;
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                background: Palette.alternate-background;
+                border-width: 1px;
+                border-color: Palette.border;
+                border-radius: Theme.radius;
+
+                VerticalLayout {
+                    padding: Theme.spacing-m;
+                    spacing: Theme.spacing-s;
+
+                    Text {
+                        text: "Dimensions personnalisées (mm)";
+                        font-weight: 600;
+                    }
+                    LineEdit {
+                        text <=> root.custom-width-mm;
+                    }
+                    LineEdit {
+                        text <=> root.custom-height-mm;
+                    }
+                    Text {
+                        text: (root.custom-error == "" ? "Tab entre les champs ; Valider confirme ; Annuler restaure." : root.custom-error);
+                        wrap: word-wrap;
+                        font-size: Theme.font-secondary;
+                    }
+                    HorizontalLayout {
+                        spacing: Theme.spacing-s;
+                        alignment: end;
+                        Button {
+                            text: "Annuler";
+                            clicked => { root.custom-cancel(); }
+                        }
+                        Button {
+                            text: "Valider";
+                            primary: true;
+                            clicked => { root.custom-confirm(); }
+                        }
+                    }
+                }
+            }
+        }
+
+        if root.save-open: Rectangle {
+            width: 100%;
+            height: 100%;
+            background: Palette.background.transparentize(0);
+            Rectangle {
+                width: 420px;
+                height: 200px;
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                background: Palette.alternate-background;
+                border-width: 1px;
+                border-color: Palette.border;
+                border-radius: Theme.radius;
+
+                VerticalLayout {
+                    padding: Theme.spacing-m;
+                    spacing: Theme.spacing-s;
+
+                    Text {
+                        text: "Enregistrer le format actuel";
+                        font-weight: 600;
+                    }
+                    LineEdit {
+                        text <=> root.preset-name-text;
+                    }
+                    Text {
+                        text: (root.preset-save-error == "" ? "Nom du préréglage (Entrée ou Valider)." : root.preset-save-error);
+                        wrap: word-wrap;
+                        font-size: Theme.font-secondary;
+                    }
+                    HorizontalLayout {
+                        spacing: Theme.spacing-s;
+                        alignment: end;
+                        Button {
+                            text: "Annuler";
+                            clicked => { root.save-open = false; root.preset-save-error = ""; }
+                        }
+                        Button {
+                            text: "Valider";
+                            primary: true;
+                            clicked => { root.save-preset-confirm(); }
+                        }
+                    }
+                }
+            }
+        }
+
         if root.output-ready: HorizontalLayout {
             spacing: Theme.spacing-m;
             padding-top: Theme.spacing-s;
@@ -286,7 +414,9 @@ export component AppWindow inherits Window {
 
     }
 
-    changed sheet-index => { root.refresh-preview(); }
+    changed sheet-index => { root.sheet-selection-changed(); root.refresh-preview(); }
+    changed sheet-width-mm => { root.refresh-preview(); }
+    changed sheet-height-mm => { root.refresh-preview(); }
     changed sheet-orientation-index => { root.refresh-preview(); }
     changed rotate-verso => { root.refresh-preview(); }
     changed bleed-text => { root.refresh-preview(); }
