@@ -137,13 +137,13 @@ jobs:
 
       - run: cargo fmt --check
 
-      - run: cargo test
+      - run: cargo test --locked
 
       - name: Build without GUI feature
-        run: cargo build
+        run: cargo build --locked
 
       - name: Build with GUI feature
-        run: cargo build --features gui
+        run: cargo build --features gui --locked
 
       - name: Lint
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --all-targets --all-features --locked -- -D warnings
