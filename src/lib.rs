@@ -15,6 +15,7 @@ pub mod pipeline;
 pub mod preflight;
 pub mod presets;
 pub mod profile;
+pub mod psd_composite;
 pub mod source;
 
 pub use config::ImpositionConfig;

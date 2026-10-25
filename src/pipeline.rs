@@ -34,39 +34,6 @@ impl PrintPipeline {
         })
     }
 
-    pub fn pre_process_psd(&self, psd_input: &str, tiff_output: &str) -> Result<()> {
-        let cmd = if cfg!(target_os = "windows") {
-            "magick.exe"
-        } else {
-            "magick"
-        };
-
-        let target_input = format!("{}[0]", psd_input);
-
-        let output = Command::new(cmd)
-            .args([
-                target_input.clone(),
-                "-flatten".to_string(),
-                "-depth".to_string(),
-                "8".to_string(),
-                "-compress".to_string(),
-                "none".to_string(),
-                tiff_output.to_string(),
-            ])
-            .output();
-
-        match output {
-            Ok(out) if out.status.success() => Ok(()),
-            Ok(out) => Err(ImposerError::Generation(
-                String::from_utf8_lossy(&out.stderr).to_string(),
-            )),
-            Err(e) => Err(ImposerError::MissingDependency(format!(
-                "ImageMagick introuvable : {}",
-                e
-            ))),
-        }
-    }
-
     pub fn finalize_pdf_x(&self, input_pdf: &str, output_pdf: &str) -> Result<()> {
         let gs_cmd = if cfg!(target_os = "windows") {
             "gswin64c.exe"

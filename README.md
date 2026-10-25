@@ -15,9 +15,9 @@ formats A4, A3 et SRA3.
 - Les sources d'une même imposition doivent avoir le même type de colorimétrie
   (`RVB` ou `CMJN`) et des dimensions compatibles, à 0.5 pt près.
 - Entrées raster supportées : PNG, JPEG/JPG et PSD. Les PSD peuvent être RGB,
-  niveaux de gris ou CMJN ; un PSD CMJN doit contenir un profil ICC intégré. Si
-  ImageMagick est disponible, l'aplatissement conserve le mode CMJN et le
-  profil ICC. Les sources RVB restent en DeviceRGB.
+  niveaux de gris ou CMJN ; un PSD CMJN doit contenir un profil ICC intégré. Le
+  décodeur Rust lit le composite et préserve le type de colorimétrie et le profil
+  ICC. Les sources RVB restent en DeviceRGB.
 - Profil couleur détecté affiché lors de la génération (CLI et TUI).
 - Interface texte (TUI) accessible sans argument ni avec `--tui`.
 - CLI.
@@ -30,8 +30,8 @@ formats A4, A3 et SRA3.
   (DeviceRGB). Le DPI est lu s'il est présent, sinon 300 DPI est utilisé.
 - `PSD` : RGB, niveaux de gris ou CMJN supportés. Un PSD CMJN doit contenir un
   profil ICC intégré ; sinon la source est refusée. La résolution est lue si elle
-  est intégrée, sinon 300 DPI est utilisée. Si ImageMagick est disponible, le PSD
-  est aplati sans conversion implicite en RGB.
+  est intégrée, sinon 300 DPI est utilisée. Le composite et le profil ICC
+  sont lus directement par le décodeur Rust, sans dépendance à ImageMagick.
 - Les profils CMJN PDF et PSD sont inspectés récursivement, y compris les
   intentions de sortie ICC.
 
@@ -56,9 +56,9 @@ Pour la commande CLI/TUI qui écrit le PDF certifié, Ghostscript doit être
 installé et disponible (commande `gs` sous Linux/macOS, `gswin64c.exe` sous
 Windows).
 
-Pour traiter les PSD, ImageMagick est utilisé si la commande `magick` est
-disponible : l'aplatissement conserve alors le mode CMJN et le profil ICC.
-Sans ImageMagick, le décodeur PSD Rust est utilisé comme repli.
+Pour traiter les PSD, le décodeur Rust lit le composite directement ; aucune
+commande `magick` n'est nécessaire. Ghostscript reste requis pour la
+certification PDF/X-4.
 
 Pour compiler avec la GUI Slint (`--features gui`), les bibliothèques
 Slint/Wayland sont également nécessaires sous Linux.

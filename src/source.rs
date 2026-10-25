@@ -285,38 +285,14 @@ fn jpeg_dpi(bytes: &[u8]) -> Option<(f32, f32)> {
 
 // ---------- PSD ----------
 fn parse_psd(bytes: &[u8]) -> Result<SourcePage> {
-    // Etape normale: extraire le composite aplati avec ImageMagick en TIFF.
-    // Si l'outil est indisponible ou l'extraction echoue, revenir au decodeur
-    // Rust deja existant.
-    let dpi = extract_psd_resolution(bytes).unwrap_or((300.0, 300.0));
-    let id = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    let temp_dir = std::env::temp_dir();
-    let psd_input = temp_dir.join(format!("imposer-psd-{}.psd", id));
-    let tiff_output = temp_dir.join(format!("imposer-psd-{}.tiff", id));
-
-    if let Ok(()) = std::fs::write(&psd_input, bytes)
-        && let Ok(pipeline) = crate::pipeline::PrintPipeline::new()
-    {
-        if pipeline
-            .pre_process_psd(
-                psd_input.to_string_lossy().as_ref(),
-                tiff_output.to_string_lossy().as_ref(),
-            )
-            .is_ok()
-        {
-            let loaded = load_flattened_psd_tiff(tiff_output.as_path(), dpi, bytes);
-            let _ = std::fs::remove_file(&psd_input);
-            let _ = std::fs::remove_file(&tiff_output);
-            if let Ok(source) = loaded {
-                return Ok(source);
-            }
-        } else {
-            let _ = std::fs::remove_file(&psd_input);
-            let _ = std::fs::remove_file(&tiff_output);
-        }
+    // Le décodeur interne lit directement l'Image Data PSD, préservant le
+    // comportement composite observé sans appeler ImageMagick.
+    match crate::psd_composite::parse_psd_composite(bytes) {
+        Ok(source) => return Ok(source),
+        Err(e @ ImposerError::NoProfile)
+        | Err(e @ ImposerError::InvalidIcc(_))
+        | Err(e @ ImposerError::AmbiguousProfile) => return Err(e),
+        Err(_) => {}
     }
 
     let cmyk_mode = psd_color_mode(bytes) == Some(4);
@@ -569,7 +545,7 @@ fn make_raster_source(
     }
 }
 
-fn extract_psd_resolution(bytes: &[u8]) -> Option<(f32, f32)> {
+pub(crate) fn extract_psd_resolution(bytes: &[u8]) -> Option<(f32, f32)> {
     let (cmd_len, header_end, resources_off, reslen, resources_end) =
         psd_resource_block_bounds(bytes)?;
     let mut pos = resources_off;
@@ -640,7 +616,7 @@ fn psd_resource_block_bounds(bytes: &[u8]) -> Option<(usize, usize, usize, usize
     Some((cmd_len, header_end, resources_off, reslen, resources_end))
 }
 
-fn extract_psd_embedded_profile(bytes: &[u8]) -> Option<Vec<u8>> {
+pub(crate) fn extract_psd_embedded_profile(bytes: &[u8]) -> Option<Vec<u8>> {
     if bytes.len() < 34 {
         return None;
     }
@@ -807,104 +783,27 @@ pub fn decompress_stream(stream: &lopdf::Stream) -> crate::error::Result<Vec<u8>
         .map_err(|e| crate::error::ImposerError::UnsupportedFilter(e.to_string()))
 }
 
-fn load_flattened_psd_tiff(
-    path: &std::path::Path,
+pub(crate) fn make_psd_source_page(
+    width_px: u32,
+    height_px: u32,
+    pixels: Vec<u8>,
+    color_space: ImageColorSpace,
     dpi: (f32, f32),
-    source_bytes: &[u8],
+    icc_profile: Option<Vec<u8>>,
 ) -> Result<SourcePage> {
-    use std::fs::File;
-    use std::io::BufReader;
-    use tiff::decoder::{Decoder, DecodingResult};
-    use tiff::tags::Tag;
-
-    let mut decoder =
-        Decoder::new(BufReader::new(File::open(path).map_err(|e| {
-            ImposerError::Parse(format!("fichier TIFF illisible : {e}"))
-        })?))
-        .map_err(|e| ImposerError::Parse(format!("décodeur TIFF PSD invalide : {e}")))?;
-
-    let (width_px, height_px) = decoder
-        .dimensions()
-        .map_err(|e| ImposerError::Parse(format!("dimensions TIFF PSD invalides : {e}")))?;
-    let color_type = decoder
-        .colortype()
-        .map_err(|e| ImposerError::Parse(format!("ColorType TIFF PSD invalide : {e}")))?;
-
-    let icc_from_tiff = decoder.get_tag_u8_vec(Tag::IccProfile).ok();
-    let decoded = decoder
-        .read_image()
-        .map_err(|e| ImposerError::Parse(format!("pixels TIFF PSD illisibles : {e}")))?;
-
-    let raw = match decoded {
-        DecodingResult::U8(v) => v,
-        DecodingResult::U16(v) => v.iter().map(|sample| (*sample >> 8) as u8).collect(),
-        _ => {
-            return Err(ImposerError::Parse(
-                "échantillonnage TIFF PSD non supporté".to_string(),
-            ));
-        }
-    };
-
-    let raw_samples = match color_type {
-        tiff::ColorType::Gray(_) => 1,
-        tiff::ColorType::GrayA(_) => 2,
-        tiff::ColorType::RGB(_) => 3,
-        tiff::ColorType::RGBA(_) => 4,
-        tiff::ColorType::CMYK(_) => 4,
-        tiff::ColorType::CMYKA(_) => 5,
-        _ => {
-            return Err(ImposerError::Parse(format!(
-                "ColorType TIFF PSD non supporté : {:?}",
-                color_type
-            )));
-        }
-    };
-    let expected_len = width_px as usize * height_px as usize * raw_samples;
-    if raw.len() != expected_len {
+    let expected = width_px as usize
+        * height_px as usize
+        * match color_space {
+            ImageColorSpace::DeviceRgb | ImageColorSpace::DeviceGray => 3,
+            ImageColorSpace::DeviceCmyk => 4,
+        };
+    if pixels.len() != expected {
         return Err(ImposerError::Parse(format!(
-            "taille pixels TIFF PSD inattendue : {} != {}",
-            raw.len(),
-            expected_len
+            "taille pixels PSD source inattendue : {} != {}",
+            pixels.len(),
+            expected
         )));
     }
-
-    let mut pixels = Vec::with_capacity(width_px as usize * height_px as usize * 3);
-    let is_cmyk = matches!(
-        color_type,
-        tiff::ColorType::CMYK(_) | tiff::ColorType::CMYKA(_)
-    );
-
-    for chunk in raw.chunks(raw_samples) {
-        match color_type {
-            tiff::ColorType::Gray(_) | tiff::ColorType::GrayA(_) => {
-                pixels.extend_from_slice(&[chunk[0], chunk[0], chunk[0]]);
-            }
-            tiff::ColorType::RGB(_) | tiff::ColorType::RGBA(_) => {
-                pixels.extend_from_slice(&chunk[0..3]);
-            }
-            tiff::ColorType::CMYK(_) | tiff::ColorType::CMYKA(_) => {
-                pixels.extend_from_slice(&chunk[0..4]);
-            }
-            _ => {
-                return Err(ImposerError::Parse(
-                    "ColorType TIFF PSD non supporté".to_string(),
-                ));
-            }
-        }
-    }
-
-    let icc_profile = if is_cmyk {
-        let profile_bytes = icc_from_tiff
-            .or_else(|| extract_psd_embedded_profile(source_bytes))
-            .ok_or(ImposerError::NoProfile)?;
-        let _ = IccProfile::parse(&profile_bytes)?;
-        Some(profile_bytes)
-    } else {
-        // An ICC tag attached to an RGB TIFF is intentionally ignored:
-        // Imposer treats flattened PSDs coming back as RGB as DeviceRGB.
-        None
-    };
-
     let width_pt = width_px as f32 / dpi.0 * 72.0;
     let height_pt = height_px as f32 / dpi.1 * 72.0;
     Ok(SourcePage {
@@ -914,11 +813,7 @@ fn load_flattened_psd_tiff(
             pixels,
             width_px,
             height_px,
-            color_space: if is_cmyk {
-                ImageColorSpace::DeviceCmyk
-            } else {
-                ImageColorSpace::DeviceRgb
-            },
+            color_space,
             icc_profile,
         },
     })

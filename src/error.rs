@@ -41,6 +41,8 @@ pub enum ImposerError {
     OutOfSheet(String),
     #[error("profil ICC invalide : {0}")]
     InvalidIcc(String),
+    #[error("PSD non supporté par le décodeur interne : {0}")]
+    PsdUnsupported(String),
     #[error("cycle détecté lors de la copie d'objet PDF")]
     CycleDetected,
     #[error("référence pendante tolérée, remplacée par null")]
