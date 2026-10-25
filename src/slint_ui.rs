@@ -14,10 +14,8 @@ pub fn run() -> Result<()> {
     const APP_ID: &str = "io.github.Franck-Demongin.Imposer";
 
     let ui = AppWindow::new().map_err(|e| ImposerError::Generation(e.to_string()))?;
-    
-    if let Err(error) = slint::set_xdg_app_id(APP_ID) {
-        eprintln!("set_xdg_app_id a échoué : {error}");
-    }
+
+    let _ = slint::set_xdg_app_id(APP_ID);
     ui.set_app_title(format!("Imposer - v{}", env!("CARGO_PKG_VERSION")).into());
     let weak_ui = ui.as_weak();
 
@@ -62,6 +60,7 @@ pub fn run() -> Result<()> {
     let _timer = timer;
 
     let user_presets = imposer::presets::load_user_presets().unwrap_or_default();
+    let pending_save_selection = std::sync::Arc::new(std::sync::Mutex::new(None::<i32>));
     let mut sheet_choices: Vec<(String, f32, f32)> = Vec::new();
     for size in imposer::config::SheetSize::builtins() {
         sheet_choices.push((size.name.clone(), size.width_mm, size.height_mm));
@@ -78,6 +77,7 @@ pub fn run() -> Result<()> {
     ui.set_sheet_options(slint::ModelRc::new(std::rc::Rc::new(
         slint::VecModel::from(sheet_labels),
     )));
+    ui.set_sheet_selection_suppress_next(false);
     if let Some(first) = sheet_choices.first() {
         let (name, width, height) = first;
         ui.set_sheet_width_mm(format!("{:.1}", *width).into());
@@ -85,6 +85,9 @@ pub fn run() -> Result<()> {
         ui.set_sheet_summary(
             format!("{} ({:.1} x {:.1} cm)", name, *width / 10.0, *height / 10.0,).into(),
         );
+        ui.set_selected_sheet_name(name.clone().into());
+        ui.set_sheet_save_visible(false);
+        ui.set_sheet_delete_visible(false);
     }
     ui.set_custom_width_mm(format!("{:.1}", 210.0).into());
     ui.set_custom_height_mm(format!("{:.1}", 297.0).into());
@@ -192,12 +195,34 @@ pub fn run() -> Result<()> {
     {
         let weak = weak_ui.clone();
         let state = sheet_choices_state.clone();
-        ui.on_sheet_selection_changed(move || {
+        let pending_save_selection_cb = pending_save_selection.clone();
+        ui.on_sheet_selection_changed(move |selected_index: i32| {
             let ui = match weak.upgrade() {
                 Some(ui) => ui,
                 None => return,
             };
-            let index = ui.get_sheet_index();
+            let pending_target = *pending_save_selection_cb.lock().unwrap();
+            if let Some(expected) = pending_target {
+                // A stale asynchronous A4 event must not leave the combo box on A4.
+                // Reassert the expected preset while ignoring the stale callback, but
+                // do not clear the pending guard until the matching event is seen.
+                if selected_index != expected {
+                    ui.set_sheet_selection_lock(true);
+                    ui.set_sheet_index(expected);
+                    ui.set_sheet_selection_lock(false);
+                    return;
+                }
+                *pending_save_selection_cb.lock().unwrap() = None;
+                return;
+            }
+            if ui.get_sheet_selection_suppress_next() {
+                ui.set_sheet_selection_suppress_next(false);
+                return;
+            }
+            if selected_index != ui.get_sheet_index() {
+                return;
+            }
+            let index = selected_index;
             if index < 0 {
                 return;
             }
@@ -206,13 +231,17 @@ pub fn run() -> Result<()> {
                 if index as usize >= guard.len() {
                     return;
                 }
+                let builtin_count = imposer::config::SheetSize::builtins().len();
                 let is_custom = index as usize == guard.len().saturating_sub(1);
+                let is_user_preset = !is_custom
+                    && index as usize >= builtin_count
+                    && (index as usize) < guard.len().saturating_sub(1);
                 let choice = if is_custom {
                     None
                 } else {
                     Some(guard[index as usize].clone())
                 };
-                (is_custom, choice)
+                (is_custom, is_user_preset, choice)
             };
             if data.0 {
                 let width = ui.get_sheet_width_mm().to_string();
@@ -221,7 +250,10 @@ pub fn run() -> Result<()> {
                 ui.set_custom_height_mm(height.into());
                 ui.set_custom_error("".into());
                 ui.set_custom_open(true);
-            } else if let Some((name, width, height)) = data.1 {
+                ui.set_selected_sheet_name("Personnalisé".into());
+                ui.set_sheet_save_visible(true);
+                ui.set_sheet_delete_visible(false);
+            } else if let Some((name, width, height)) = data.2 {
                 ui.set_sheet_width_mm(format!("{:.1}", width).into());
                 ui.set_sheet_height_mm(format!("{:.1}", height).into());
                 ui.set_sheet_summary(
@@ -229,6 +261,9 @@ pub fn run() -> Result<()> {
                 );
                 ui.set_previous_sheet_index(index);
                 ui.set_custom_open(false);
+                ui.set_selected_sheet_name(name.clone().into());
+                ui.set_sheet_save_visible(false);
+                ui.set_sheet_delete_visible(data.1);
             }
         });
     }
@@ -255,6 +290,9 @@ pub fn run() -> Result<()> {
                     );
                     ui.set_custom_error("".into());
                     ui.set_custom_open(false);
+                    ui.set_selected_sheet_name("Personnalisé".into());
+                    ui.set_sheet_save_visible(true);
+                    ui.set_sheet_delete_visible(false);
                 }
                 _ => {
                     ui.set_custom_error(
@@ -323,6 +361,11 @@ pub fn run() -> Result<()> {
             match imposer::presets::validate_user_preset(&name, width, height, &existing, &builtins)
             {
                 Ok(user_preset) => {
+                    let pending = pending_save_selection.clone();
+                    ui.set_sheet_selection_lock(true);
+                    ui.set_sheet_selection_suppress_next(true);
+                    let selected_index = builtins.len() as i32 + existing.len() as i32;
+                    *pending.lock().unwrap() = Some(selected_index);
                     let mut updated = existing;
                     updated.push(user_preset.clone());
                     match imposer::presets::save_user_presets(&updated) {
@@ -353,24 +396,62 @@ pub fn run() -> Result<()> {
                                 slint::VecModel::from(labels),
                             )));
                             let selected_index = (rebuilt.len() as i32 - 1 - 1).max(0);
-                            ui.set_sheet_width_mm(format!("{:.1}", width).into());
-                            ui.set_sheet_height_mm(format!("{:.1}", height).into());
+
+                            // The combo box is set directly while locked, avoiding a
+                            // synchronous callback during the rebuild.
+                            ui.set_sheet_index(selected_index);
+                            *pending.lock().unwrap() = Some(selected_index);
+
+                            // Résoudre le format réellement ciblé à partir du préréglage
+                            // reconstruit. Ne pas supposer que la valeur actuelle de
+                            // sheet-index (ni un déclenchement conditionnel du callback
+                            // Slint) correspondra au bon préréglage : on met à jour ses
+                            // champs directement avec ses dimensions et son nom.
+                            let (target_name, target_width, target_height) =
+                                rebuilt[selected_index as usize].clone();
+                            ui.set_sheet_width_mm(format!("{:.1}", target_width).into());
+                            ui.set_sheet_height_mm(format!("{:.1}", target_height).into());
                             ui.set_sheet_summary(
                                 format!(
                                     "{} ({:.1} x {:.1} cm)",
-                                    user_preset.name,
-                                    width / 10.0,
-                                    height / 10.0,
+                                    target_name,
+                                    target_width / 10.0,
+                                    target_height / 10.0,
                                 )
                                 .into(),
                             );
                             ui.set_status(
-                                format!("Format enregistré: {}", user_preset.name,).into(),
+                                format!(
+                                    "Format enregistré: {} ({:.0} x {:.0} mm).",
+                                    user_preset.name, width, height
+                                )
+                                .into(),
                             );
                             ui.set_previous_sheet_index(selected_index);
                             ui.set_custom_open(false);
                             ui.set_save_open(false);
-                            ui.set_sheet_index(selected_index);
+                            ui.set_selected_sheet_name(target_name.clone().into());
+                            ui.set_sheet_save_visible(false);
+                            ui.set_sheet_delete_visible(true);
+                            ui.invoke_refresh_preview();
+                            ui.set_sheet_selection_lock(false);
+
+                            // Pending guards are best-effort: clear them if an asynchronous
+                            // generated callback cannot do so itself.
+                            let pending_clear = pending.clone();
+                            let weak = ui.as_weak();
+                            let timer = slint::Timer::default();
+                            timer.start(
+                                slint::TimerMode::SingleShot,
+                                std::time::Duration::from_millis(300),
+                                move || {
+                                    *pending_clear.lock().unwrap() = None;
+                                    if let Some(ui) = weak.upgrade() {
+                                        ui.set_sheet_selection_suppress_next(false);
+                                    }
+                                },
+                            );
+                            let _ = timer;
                         }
                         Err(error) => {
                             ui.set_preset_save_error(error.into());
@@ -381,6 +462,116 @@ pub fn run() -> Result<()> {
                     ui.set_preset_save_error(error.into());
                 }
             }
+        });
+    }
+
+    // Suppression des préréglages utilisateur
+    {
+        let weak = ui.as_weak();
+        let state = sheet_choices_state.clone();
+        ui.on_delete_preset_requested(move || {
+            let ui = match weak.upgrade() {
+                Some(ui) => ui,
+                None => return,
+            };
+            if ui.get_busy() {
+                return;
+            }
+            let index = ui.get_sheet_index();
+            let (is_valid_user_preset, preset_name) = {
+                let guard = state.lock().unwrap();
+                if index < 0 || index as usize >= guard.len() {
+                    return;
+                }
+                let builtin_count = imposer::config::SheetSize::builtins().len();
+                let is_user_preset = index as usize >= builtin_count
+                    && (index as usize) < guard.len().saturating_sub(1);
+                let name = guard[index as usize].0.clone();
+                (is_user_preset, name)
+            };
+            if !is_valid_user_preset {
+                return;
+            }
+            ui.set_delete_preset_name(preset_name.into());
+            ui.set_delete_preset_error("".into());
+            ui.set_delete_open(true);
+        });
+    }
+    {
+        let weak = weak_ui.clone();
+        let state = sheet_choices_state.clone();
+        ui.on_delete_preset_confirm(move || {
+            let ui = match weak.upgrade() {
+                Some(ui) => ui,
+                None => return,
+            };
+            if ui.get_busy() {
+                return;
+            }
+            let index = ui.get_sheet_index();
+            let target_name = {
+                let guard = state.lock().unwrap();
+                if index < 0 || index as usize >= guard.len() {
+                    ui.set_delete_preset_error("Sélection invalide.".into());
+                    return;
+                }
+                let builtin_count = imposer::config::SheetSize::builtins().len();
+                if (index as usize) < builtin_count
+                    || (index as usize) >= guard.len().saturating_sub(1)
+                {
+                    ui.set_delete_preset_error("Ce format ne peut pas être supprimé.".into());
+                    return;
+                }
+                guard[index as usize].0.clone()
+            };
+
+            let existing = imposer::presets::load_user_presets().unwrap_or_default();
+            let updated: Vec<imposer::presets::UserPreset> = existing
+                .into_iter()
+                .filter(|preset| !preset.name.eq_ignore_ascii_case(&target_name))
+                .collect();
+            if let Err(error) = imposer::presets::save_user_presets(&updated) {
+                ui.set_delete_preset_error(error.into());
+                return;
+            }
+
+            let builtins = imposer::config::SheetSize::builtins();
+            let mut rebuilt: Vec<(String, f32, f32)> = builtins
+                .into_iter()
+                .map(|preset| (preset.name.clone(), preset.width_mm, preset.height_mm))
+                .collect();
+            for preset in &updated {
+                rebuilt.push((preset.name.clone(), preset.width_mm, preset.height_mm));
+            }
+            rebuilt.push(("Personnalisé".to_string(), 210.0, 297.0));
+
+            {
+                let mut guard = state.lock().unwrap();
+                *guard = rebuilt.clone();
+            }
+            let labels: Vec<slint::SharedString> = rebuilt
+                .iter()
+                .map(|(name, _, _)| name.clone().into())
+                .collect();
+            ui.set_sheet_options(slint::ModelRc::new(std::rc::Rc::new(
+                slint::VecModel::from(labels),
+            )));
+
+            let (name, width, height) = rebuilt[0].clone();
+            ui.set_sheet_index(0);
+            ui.set_previous_sheet_index(0);
+            ui.set_sheet_width_mm(format!("{:.1}", width).into());
+            ui.set_sheet_height_mm(format!("{:.1}", height).into());
+            ui.set_sheet_summary(
+                format!("{} ({:.1} x {:.1} cm)", name, width / 10.0, height / 10.0).into(),
+            );
+            ui.set_selected_sheet_name(name.into());
+            ui.set_sheet_save_visible(false);
+            ui.set_sheet_delete_visible(false);
+            ui.set_custom_open(false);
+            ui.set_delete_open(false);
+            ui.set_delete_preset_error("".into());
+            ui.set_status(format!("Format supprimé: {}", target_name).into());
         });
     }
 
@@ -540,6 +731,7 @@ pub fn run() -> Result<()> {
 
     refresh_preview(&ui);
     ui.set_status("Prêt. Sélectionnez jusqu'à 2 sources puis cliquez sur Générer.".into());
+
     ui.run()
         .map_err(|e| ImposerError::Generation(e.to_string()))?;
     Ok(())
