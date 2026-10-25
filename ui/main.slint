@@ -49,13 +49,26 @@ component PopupButtonRow inherits HorizontalLayout {
     @children
 }
 
-component ModalDialog inherits Rectangle {
+component ModalDialog inherits FocusScope {
     in property <length> dialog-width: 420px;
     in property <length> dialog-height: 140px;
-
+    callback close();
     z: 1000;
     width: 100%;
     height: 100%;
+    enabled: true;
+    focus-on-click: true;
+    focus-on-tab-navigation: true;
+
+    init => { self.focus(); }
+
+    capture-key-pressed(event) => {
+        if (event.text == Key.Escape) {
+            root.close();
+            return accept;
+        }
+        return reject;
+    }
 
     Rectangle {
         width: 100%;
@@ -403,6 +416,7 @@ export component AppWindow inherits Window {
     if root.custom-open: ModalDialog {
         dialog-width: 420px;
         dialog-height: 210px;
+        close => { root.custom-cancel(); }
 
         Text {
             text: "Dimensions personnalisées (mm)";
@@ -438,6 +452,7 @@ export component AppWindow inherits Window {
     if root.save-open: ModalDialog {
         dialog-width: 420px;
         dialog-height: 160px;
+        close => { root.save-open = false; root.preset-save-error = ""; }
 
         Text {
             text: "Enregistrer le format actuel";
@@ -470,6 +485,7 @@ export component AppWindow inherits Window {
     if root.delete-open: ModalDialog {
         dialog-width: 420px;
         dialog-height: 140px;
+        close => { root.delete-open = false; root.delete-preset-error = ""; }
 
         Text {
             text: "Supprimer le format « " + root.delete-preset-name + " » ?";
