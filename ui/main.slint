@@ -40,6 +40,15 @@ component Card inherits Rectangle {
     }
 }
 
+component PopupButtonRow inherits HorizontalLayout {
+    spacing: Theme.spacing-m;
+    padding-top: Theme.spacing-s;
+    alignment: end;
+    vertical-stretch: 0;
+
+    @children
+}
+
 export component AppWindow inherits Window {
     in property <string> app-title: "Imposer";
     title: root.app-title;
@@ -327,6 +336,7 @@ export component AppWindow inherits Window {
                 VerticalLayout {
                     padding: Theme.spacing-s;
                     spacing: Theme.spacing-s;
+                    alignment: stretch;
 
                     Text {
                         text: "Dimensions personnalisées (mm)";
@@ -343,10 +353,10 @@ export component AppWindow inherits Window {
                         wrap: word-wrap;
                         font-size: Theme.font-secondary;
                     }
-                    HorizontalLayout {
-                        spacing: Theme.spacing-m;
-                        padding-top: Theme.spacing-s;
-                        alignment: end;
+                    Rectangle {
+                        vertical-stretch: 1;
+                    }
+                    PopupButtonRow {
                         Button {
                             text: "Annuler";
                             clicked => { root.custom-cancel(); }
@@ -395,11 +405,7 @@ export component AppWindow inherits Window {
                     Rectangle {
                         vertical-stretch: 1;
                     }
-                    HorizontalLayout {
-                        vertical-stretch: 0;
-                        spacing: Theme.spacing-m;
-                        padding-top: Theme.spacing-s;
-                        alignment: end;
+                    PopupButtonRow {
                         Button {
                             text: "Annuler";
                             clicked => { root.save-open = false; root.preset-save-error = ""; }
@@ -447,11 +453,7 @@ export component AppWindow inherits Window {
                     Rectangle {
                         vertical-stretch: 1;
                     }
-                    HorizontalLayout {
-                        vertical-stretch: 0;
-                        spacing: Theme.spacing-m;
-                        padding-top: Theme.spacing-s;
-                        alignment: end;
+                    PopupButtonRow {
                         Button {
                             text: "Annuler";
                             clicked => { root.delete-open = false; root.delete-preset-error = ""; }
