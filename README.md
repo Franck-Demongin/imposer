@@ -136,10 +136,13 @@ action discrète « Sauvegarder ce format » ouvre une pop-up demandant un nom, 
 enregistre le format dans les préférences utilisateur. Les formats enregistrés sont
 rechargés au prochain lancement et apparaissent à côté des formats intégrés. Le
 format actif est rappelé dans la ligne « Feuille - A4 (21.0 x 29.7 cm) » et dans
-le récapitulatif. Les préréglés sont stockés en TOML, par exemple
-`~/.config/imposer/presets.toml` sur Linux/macOS et `%APPDATA%/imposer/presets.toml`
-sur Windows ; les noms vides, trop longs ou déjà utilisés (formats intégrés
-inclus) sont refusés.
+le récapitulatif. Les préréglés sont stockés en TOML, dans `presets.toml`, selon
+le système :
+- Linux : `${XDG_CONFIG_HOME:-$HOME/.config}/imposer/presets.toml`
+- macOS : `$HOME/Library/Application Support/imposer/presets.toml`
+- Windows : `%APPDATA%\imposer\presets.toml` (ou, à défaut, `%LOCALAPPDATA%\imposer\presets.toml`,
+  puis `%USERPROFILE%\AppData\Roaming\imposer\presets.toml`)
+Les noms vides, trop longs ou déjà utilisés (formats intégrés inclus) sont refusés.
 
 
 ## Interface graphique optionnelle (Slint)
