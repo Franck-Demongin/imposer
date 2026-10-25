@@ -15,6 +15,10 @@ pub const APP_ID: &str = "io.github.Franck-Demongin.Imposer";
 pub fn run() -> Result<()> {
     let ui = AppWindow::new().map_err(|e| ImposerError::Generation(e.to_string()))?;
 
+    // IMPORTANT : appeler set_xdg_app_id APRÈS AppWindow::new().
+
+    // Constaté sous GNOME/Wayland : appelée avant, l'icône n'est pas appliquée.
+
     if let Err(e) = slint::set_xdg_app_id(APP_ID) {
         eprintln!("avertissement : app_id non appliqué : {e}");
     }
