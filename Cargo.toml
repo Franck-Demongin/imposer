@@ -1,6 +1,6 @@
 [package]
 name = "imposer"
-version = "0.7.0"
+version = "0.8.0"
 edition = "2024"
 description = "Imposition de documents PDF sur des planches aux formats A4, A3, SRA3..."
 license = "MIT"
