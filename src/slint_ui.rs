@@ -12,8 +12,12 @@ slint::include_modules!();
 
 pub fn run() -> Result<()> {
     const APP_ID: &str = "io.github.Franck-Demongin.Imposer";
-    let _ = slint::set_xdg_app_id(APP_ID);
+
     let ui = AppWindow::new().map_err(|e| ImposerError::Generation(e.to_string()))?;
+    
+    if let Err(error) = slint::set_xdg_app_id(APP_ID) {
+        eprintln!("set_xdg_app_id a échoué : {error}");
+    }
     ui.set_app_title(format!("Imposer - v{}", env!("CARGO_PKG_VERSION")).into());
     let weak_ui = ui.as_weak();
 
