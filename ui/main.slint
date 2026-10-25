@@ -41,7 +41,8 @@ component Card inherits Rectangle {
 }
 
 export component AppWindow inherits Window {
-    title: "Imposer";
+    in property <string> app-title: "Imposer";
+    title: root.app-title;
     icon: @image-url("../assets/icons/imposer-256.png");
     preferred-width: 1100px;
     preferred-height: 720px;
