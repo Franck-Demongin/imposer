@@ -10,8 +10,10 @@ use std::sync::{Arc, Mutex};
 
 slint::include_modules!();
 
+pub const APP_ID: &str = "io.github.Franck-Demongin.Imposer";
+
 pub fn run() -> Result<()> {
-    const APP_ID: &str = "io.github.Franck-Demongin.Imposer";
+    // const APP_ID: &str = "io.github.Franck-Demongin.Imposer";
 
     let ui = AppWindow::new().map_err(|e| ImposerError::Generation(e.to_string()))?;
 
