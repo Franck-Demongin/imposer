@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/Franck-Demongin/Imposer/actions/workflows/ci.yml/badge.svg)](https://github.com/Franck-Demongin/Imposer/actions/workflows/ci.yml)
 [![Publication](https://img.shields.io/github/v/release/Franck-Demongin/Imposer)](https://github.com/Franck-Demongin/Imposer/releases)
-[![Licence MIT](https://img.shields.io/badge/Licence-MIT-blue.svg)](Cargo.toml)
+[![Licence MIT](https://img.shields.io/badge/Licence-MIT-blue.svg)](LICENSE)
 
 Imposer est une application Rust pour imposer des pages PDF, PNG, JPEG/JPG et PSD
 sur des planches A4, A3 et SRA3. Elle fournit un outil en ligne de commande,
@@ -19,7 +19,7 @@ une interface texte interactive et une interface graphique Slint optionnelle.
 - [Référence de ligne de commande](#référence-de-ligne-de-commande)
 - [Interface texte (TUI)](#interface-texte-tui)
 - [Interface graphique (Slint)](#interface-graphique-slint)
-- [Formats de feuille et préréglés](#formats-de-feuille-et-préréglés)
+- [Formats de feuille et préréglages](#formats-de-feuille-et-préréglages)
 - [Profils couleur et PDF/X-4](#profils-couleur-et-pdfx-4)
 - [Sortie et repères de coupe](#sortie-et-repères-de-coupe)
 - [Intégration Linux](#intégration-linux)
@@ -59,11 +59,41 @@ artefacts de publication sont `imposer.exe`, `imposer-gui.exe`, `imposer` et
 
 ## Installation
 
+Rust 1.85 ou supérieur est nécessaire ; Rust 1.85 étant la version minimale compatible avec l'édition 2024 déclarée dans `Cargo.toml`.
+
+### Dépendances système Linux
+
+Pour compiler la GUI sous Linux, y compris via `cargo install --locked --features gui` :
+
+```sh
+sudo apt-get install -y \
+  libfontconfig1-dev \
+  libfreetype6-dev \
+  libx11-dev \
+  libxkbcommon-dev \
+  libwayland-dev \
+  ghostscript
+```
+
+### Prérequis Windows
+
+Ghostscript doit être installé pour générer des sources RVB ; `gswin64c.exe` doit être disponible dans `PATH`. Les sources CMYK compatibles sont émises en natif, sans Ghostscript.
+
 ### Télécharger une version
 
 Récupérez l'exécutable correspondant au système depuis la page Release de GitHub :
 sous Windows, `imposer.exe` et `imposer-gui.exe`; sous Linux, `imposer` et
 `imposer-gui`.
+
+Les binaires Linux téléchargés doivent être exécutables et peuvent utiliser
+l'intégration bureau livrée avec le dépôt :
+
+```sh
+chmod +x imposer-gui
+./packaging/linux/install-local.sh ~/Téléchargements/imposer-gui
+```
+
+Les binaires Linux sont compilés sur une version récente d'Ubuntu ; une distribution plus ancienne peut être incompatible avec leur version de `glibc`.
 
 Exécution directe :
 
@@ -80,11 +110,12 @@ Exécution directe :
 ### Installer avec Cargo
 
 ```sh
-cargo install --git https://github.com/Franck-Demongin/Imposer.git --tag v0.8.2 --features gui
+cargo install --locked --git https://github.com/Franck-Demongin/Imposer.git --branch master --features gui
 ```
 
-Les commandes sont installées dans `$HOME/.cargo/bin`. Sur cette configuration,
-ce répertoire peut nécessiter d'être ajouté temporairement :
+Les commandes sont installées dans `$HOME/.cargo/bin`. Si ce répertoire n'est
+pas dans `PATH`, ajoutez-le dans votre profil ou la session active, puis relancez
+la détection des commandes :
 
 ```sh
 export PATH="$HOME/.cargo/bin:$PATH"
@@ -187,7 +218,7 @@ imposer \
 | --- | --- | --- |
 | `-i, --input` | absent | Source, option répétable |
 | `-o, --output` | absent | PDF généré |
-| `--sheet` | `a4` | `a4`, `a3`, `sra3` ou valeur personnalisée |
+| `--sheet` | `a4` | `a4`, `a3` ou `sra3` (formats intégrés ; dimensions personnalisées avec `--sheet-width-mm` et `--sheet-height-mm`) |
 | `--sheet-width-mm` | absent | Largeur de feuille personnalisée, en millimètres |
 | `--sheet-height-mm` | absent | Hauteur de feuille personnalisée, en millimètres |
 | `--sheet-orientation` | `auto` | `auto`, `portrait` ou `landscape` |
@@ -218,18 +249,18 @@ Elle prend également en charge :
 
 - les formats A4, A3 et SRA3;
 - les dimensions de feuille selon l'utilisateur, avec validation;
-- les préréglés personnels persistants;
+- les préréglages personnels persistants;
 - les contrôles, le niveau de statut et un indicateur d'activité pendant la
   génération;
 - l'ouverture du fichier ou du dossier généré lorsqu'il est disponible.
 
-Les préréglés personnels sont stockés dans un fichier TOML :
+Les préréglages personnels sont stockés dans un fichier TOML :
 
 - Linux : `${XDG_CONFIG_HOME:-$HOME/.config}/imposer/presets.toml`
 - macOS : `$HOME/Library/Application Support/imposer/presets.toml`
 - Windows : `%APPDATA%\imposer\presets.toml`
 
-Les noms de préréglé doivent être uniques. Les noms vides ou trop longs sont
+Les noms de préréglage doivent être uniques. Les noms vides ou trop longs sont
 refusés.
 
 ## Interface graphique (Slint)
@@ -253,12 +284,22 @@ interface graphique :
 Aucune action supplémentaire n'est nécessaire après compilation. L'icône
 d'application est incorporée lors de la compilation.
 
-## Formats de feuille et préréglés
+## Formats de feuille et préréglages
+
+Exemple avec une feuille personnalisée :
+
+```sh
+imposer \
+  --input document.pdf \
+  --output planche.pdf \
+  --sheet-width-mm 320 \
+  --sheet-height-mm 450
+```
 
 Les formats intégrés sont verrouillés sur A4, A3 et SRA3. Les dimensions
 personnalisées exigent une largeur et une hauteur, exprimées en millimètres.
 
-Les nouveaux préréglés sont validés avant d'être écrits, évitant qu'un fichier
+Les nouveaux préréglages sont validés avant d'être écrits, évitant qu'un fichier
 TOML devienne inutilisable à cause de valeurs incorrectes.
 
 ## Profils couleur et PDF/X-4
@@ -272,6 +313,9 @@ TOML devienne inutilisable à cause de valeurs incorrectes.
   un profil compatible.
 - La génération est native pour le CMJN compatible et utilise Ghostscript comme
   repli pour RVB, les profils incompatibles et les cas non supportés.
+- Ghostscript est requis pour les sources RVB, y compris PNG, JPEG/JPG ; sans
+  lui, ces générations échouent avec `Ghostscript introuvable`. Les sources
+  CMYK compatibles sont émises en natif sans Ghostscript.
 - Aucune conversion implicite n'existe entre RVB et CMJN.
 
 La ligne de commande affiche le profil couleur détecté pour chaque source avant
@@ -317,9 +361,9 @@ nécessiter une nouvelle session avant d'afficher le lanceur fraîchement instal
 
 ## Intégration Windows
 
-- L'icône est intégrée à `imposer-gui.exe` pendant la compilation par
-  `winresource` et `build.rs`.
-- Aucune installation supplémentaire n'est requise.
+- L'icône est intégrée avec `winresource` pendant la compilation.
+- La génération de sources RVB requiert Ghostscript (`gswin64c.exe`) dans PATH ;
+  les sources CMYK compatibles sont émises en natif.
 - Le paramètre `windows_subsystem = "windows"` évite l'ouverture d'une console.
 
 ## Icônes et ressources
@@ -336,32 +380,21 @@ modification du SVG source.
 
 ## Développement
 
-Dépendances sur Ubuntu :
-
-```sh
-sudo apt-get install -y \
-  libfontconfig1-dev \
-  libfreetype6-dev \
-  libx11-dev \
-  libxkbcommon-dev \
-  libwayland-dev \
-  desktop-file-utils
-```
-
 Validation locale :
 
 ```sh
 cargo fmt --check
-cargo test
 cargo test --locked
-cargo clippy --all-targets --all-features -- -D warnings
-cargo build
-cargo build --features gui
+cargo clippy --all-targets --all-features --locked -- -D warnings
+cargo build --locked
+cargo build --locked --features gui
 ```
 
-Valider l'entrée de bureau sur Linux :
+La CI utilise les mêmes commandes. Pour valider l'entrée de bureau sous Linux,
+`desktop-file-utils` reste nécessaire :
 
 ```sh
+sudo apt-get install -y desktop-file-utils
 desktop-file-validate packaging/linux/io.github.Franck-Demongin.Imposer.desktop
 ```
 
@@ -375,24 +408,29 @@ utilise les builds verrouillés. La publication est déclenchée par un tag `v*`
 2. Le job Linux dépend du précédent, puis ajoute `imposer` et `imposer-gui`.
 
 Les builds natifs ciblent `windows-latest` et `ubuntu-latest`. Les artefacts sont
-tous attachés à la même release.
+tous attachés à la même release. La CI vérifie aussi les fichiers requis, l'APP_ID
+et la cohérence du fichier `.desktop` vis-à-vis de `io.github.Franck-Demongin.Imposer`.
 
 ## Structure du dépôt
 
 ```text
-src/main.rs                 Point d'entrée CLI
+src/main.rs                 Point d'entrée CLI/TUI
+src/gui_main.rs             Point d'entrée GUI Slint
 src/lib.rs                  Bibliothèque partagée et API publique
 src/tui.rs                  Interface texte
 src/slint_ui.rs             Interface graphique Slint
 ui/main.slint               Interface Slint et jetons de style
 src/generation.rs           Orchestration partagée
 src/layout.rs               Calcul de la mise en page
-src/pdf.rs                  Génération PDF et repères de coupe
-src/source.rs               Formats d'entrée et dimensions
 src/config.rs               Options d'imposition
+src/pdf.rs                  Génération PDF et repères
+src/source.rs               Formats d'entrée et dimensions
 src/icc.rs                  Gestion des profils ICC
-packaging/linux/            Intégration bureau
+build.rs                    Compilation Slint et icône Windows
+packaging/linux/            Intégration bureau Linux
 assets/icons/               Icônes et script de génération
+examples/                  Exemples et générateur de données
+.github/workflows/         CI et publication
 tests/                      Tests unitaires et d'intégration
 ```
 
@@ -404,9 +442,8 @@ changements d'interface, conservez le thème système et laissez l'identifiant
 application correspondre à `io.github.Franck-Demongin.Imposer`.
 
 Pour les changements concernant les couleurs ou les formats de feuille, décrivez
-la couverture de tests de non-régression attendue dans la pull request.
+la couverture de tests de non-régression attendue dans la pull request. Ne pas déplacer `APP_ID` ni modifier l'ordre d'appel dans `src/slint_ui.rs`, validé par la CI.
 
 ## Licence
 
-Le projet est sous licence MIT selon le champ `license` de `Cargo.toml`. Les
-dépendances Rust et Slint conservent leur licence propre.
+MIT, voir le fichier `LICENSE`. Les dépendances Rust et Slint conservent leurs licences propres.

@@ -2,7 +2,8 @@
 name = "imposer"
 version = "0.8.2"
 edition = "2024"
-description = "Imposition de documents PDF sur des planches aux formats A4, A3, SRA3..."
+rust-version = "1.85"
+description = "Imposition de documents PDF, PNG, JPEG et PSD sur des planches aux formats A4, A3 et SRA3"
 license = "MIT"
 
 [[bin]]
