@@ -51,6 +51,7 @@ jobs:
             assets/icons/ui/folder-open.svg \
             assets/icons/ui/delete.svg \
             assets/icons/ui/document-save.svg \
+            assets/icons/ui/close.svg \
             packaging/linux/install-local.sh \
             packaging/linux/uninstall-local.sh \
             LICENSE
