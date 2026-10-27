@@ -200,10 +200,10 @@ pub fn run() -> Result<()> {
         });
     }
 
-    // Dossier de sortie
+    // Fichier de sortie
     {
         let weak = weak_ui.clone();
-        ui.on_browse_output_directory(move || {
+        ui.on_browse_output(move || {
             let ui = match weak.upgrade() {
                 Some(ui) => ui,
                 None => return,
@@ -211,9 +211,15 @@ pub fn run() -> Result<()> {
             if ui.get_busy() {
                 return;
             }
-            if let Some(folder) = rfd::FileDialog::new().pick_folder() {
-                ui.set_output_dir(folder.display().to_string().into());
-            }
+            let picked = rfd::FileDialog::new()
+                .add_filter("PDF", &["pdf"])
+                .set_title("Enregistrer le PDF généré")
+                .save_file();
+            let Some(path) = picked else {
+                return;
+            };
+            let normalized = ensure_pdf_extension(path);
+            ui.set_output_path(normalized.display().to_string().into());
         });
     }
 
@@ -703,15 +709,14 @@ pub fn run() -> Result<()> {
                 return;
             }
 
-            let output_dir = ui.get_output_dir().to_string();
-            let output_name = ui.get_output_name().to_string();
-            let destination = match output_path(&output_dir, &output_name) {
+            let output_path_raw = ui.get_output_path().to_string();
+            let destination = match resolve_output_path(&output_path_raw) {
                 Some(path) => path,
                 None => {
                     enqueue_snackbar(
                         &ui,
                         &snackbar_state,
-                        "Dossier ou nom de sortie invalide.".to_owned(),
+                        "Chemin de sortie invalide.".to_owned(),
                         2,
                     );
                     return;
@@ -1013,39 +1018,55 @@ fn auto_fill_output(ui: &AppWindow, path: &Path) {
         .unwrap_or(Path::new("."))
         .display()
         .to_string();
-    if ui.get_output_dir().to_string().trim().is_empty() {
-        ui.set_output_dir(parent.into());
-    }
-    if ui.get_output_name().to_string().trim().is_empty() {
+    if ui.get_output_path().to_string().trim().is_empty() {
         let stem = path
             .file_stem()
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_else(|| String::from("output"));
-        ui.set_output_name(format!("{}_imposed.pdf", stem).into());
+        ui.set_output_path(
+            Path::new(&parent)
+                .join(format!("{}_imposed.pdf", stem))
+                .display()
+                .to_string()
+                .into(),
+        );
     }
 }
 
-fn output_path(output_dir: &str, raw_name: &str) -> Option<PathBuf> {
-    let directory = output_dir.trim();
-    let raw_name = raw_name.trim();
-    if directory.is_empty() || raw_name.is_empty() {
+fn resolve_output_path(raw: &str) -> Option<PathBuf> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed.ends_with('/') || trimmed.ends_with('\\') {
         return None;
     }
-    let name_path = Path::new(raw_name);
-    let components: Vec<_> = name_path.components().collect();
-    if name_path.is_absolute()
-        || components.is_empty()
-        || components.len() != 1
-        || raw_name == "."
-        || raw_name == ".."
-    {
-        return None;
+    let path = PathBuf::from(trimmed);
+    path.file_name()?;
+    let is_pdf = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| extension.eq_ignore_ascii_case("pdf"))
+        .unwrap_or(false);
+    if is_pdf {
+        Some(path)
+    } else {
+        let mut value = path.into_os_string();
+        value.push(".pdf");
+        Some(PathBuf::from(value))
     }
-    let mut name = raw_name.to_string();
-    if !raw_name.to_ascii_lowercase().ends_with(".pdf") {
-        name.push_str(".pdf");
+}
+
+fn ensure_pdf_extension(path: PathBuf) -> PathBuf {
+    let is_pdf = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| extension.eq_ignore_ascii_case("pdf"))
+        .unwrap_or(false);
+    if is_pdf {
+        path
+    } else {
+        let mut value = path.into_os_string();
+        value.push(".pdf");
+        PathBuf::from(value)
     }
-    Some(PathBuf::from(directory).join(name))
 }
 
 fn parse_slint_dimension(text: slint::SharedString) -> Option<f32> {
