@@ -175,8 +175,6 @@ export component AppWindow inherits Window {
     min-width: 760px;
     min-height: 520px;
 
-    in property <string> status: "Prêt.";
-    in property <int> status-level: 0;
     in property <bool> busy: false;
 
     in property <[SnackbarItem]> snackbar-items: [];
@@ -462,13 +460,8 @@ export component AppWindow inherits Window {
             spacing: Theme.spacing;
             padding-top: Theme.spacing;
 
-            Text {
-                text: root.status;
-                wrap: word-wrap;
-                overflow: elide;
+            Rectangle {
                 horizontal-stretch: 1;
-                font-size: Theme.font-small;
-                color: root.status-level == 2 ? #c42b1c : (root.status-level == 1 ? #107c10 : Palette.foreground);
             }
 
             Button {
