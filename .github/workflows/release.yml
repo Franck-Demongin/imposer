@@ -145,7 +145,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           name: Imposer ${{ github.ref_name }}
-          name: Imposer ${{ github.ref_name }}
           body_path: release_notes.md
           files: release/*
           fail_on_unmatched_files: true
