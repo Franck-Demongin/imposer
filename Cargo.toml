@@ -28,7 +28,7 @@ slint-ui = ["dep:slint", "dep:rfd", "dep:slint-build"]
 clap = { version = "4.5", features = ["derive"] }
 lopdf = "0.45"
 thiserror = "2.0"
-ratatui = "0.29"
+ratatui = "0.30"
 crossterm = "0.29"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "tiff"] }
 psd = "0.3.5"
@@ -43,9 +43,10 @@ quick-xml = "0.38"
 uuid = "1.26"
 serde = { version = "1.0", features = ["derive"] }
 toml = "0.8"
-slint = { version = "1", default-features = false, features = [
+slint = { version = "1.18", default-features = false, features = [
     "std",
     "compat-1-2",
+    "compat-1-18",
     "accessibility",
     "backend-winit",
     "renderer-femtovg",
@@ -54,7 +55,7 @@ slint = { version = "1", default-features = false, features = [
 rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "tokio"], optional = true }
 
 [build-dependencies]
-slint-build = { version = "1", optional = true }
+slint-build = { version = "1.18", default-features = false, features = ["compat-1-18", "renderer-software"], optional = true }
 
 [target.'cfg(windows)'.build-dependencies]
 winresource = "0.1"
