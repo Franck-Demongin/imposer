@@ -181,8 +181,7 @@ export component AppWindow inherits Window {
     in property <string> source-1: "";
     in property <string> source-2: "";
 
-    in-out property <string> output-dir: "";
-    in-out property <string> output-name: "";
+    in-out property <string> output-path: "";
 
     in-out property <int> sheet-index: 0;
     in-out property <bool> sheet-selection-lock: false;
@@ -225,7 +224,7 @@ export component AppWindow inherits Window {
     callback browse-source-two();
     callback close-snackbar(int);
     callback remove-last-source();
-    callback browse-output-directory();
+    callback browse-output();
     callback generate();
     callback open-output-file();
     callback open-output-folder();
@@ -320,12 +319,9 @@ export component AppWindow inherits Window {
                             spacing-horizontal: Theme.spacing;
                             spacing-vertical: Theme.spacing;
 
-                            Text { text: "Dossier"; row: 0; col: 0; vertical-alignment: center; }
-                            LineEdit { text <=> root.output-dir; row: 0; col: 1; horizontal-stretch: 1; }
-                            Button { text: "Dossier…"; icon: @image-url("../assets/icons/ui/folder-open.svg"); icon-size: 16px; colorize-icon: true; enabled: !root.busy; row: 0; col: 2; min-width: 100px; clicked => { root.browse-output-directory(); } }
-
-                            Text { text: "Fichier"; row: 1; col: 0; vertical-alignment: center; }
-                            LineEdit { text <=> root.output-name; row: 1; col: 1; horizontal-stretch: 1; }
+                            Text { text: "Sortie"; row: 0; col: 0; vertical-alignment: center; }
+                            LineEdit { text <=> root.output-path; row: 0; col: 1; horizontal-stretch: 1; }
+                            Button { text: "Parcourir…"; icon: @image-url("../assets/icons/ui/folder-open.svg"); icon-size: 16px; colorize-icon: true; enabled: !root.busy; row: 0; col: 2; min-width: 100px; clicked => { root.browse-output(); } }
                         }
                     }
 
@@ -426,8 +422,7 @@ export component AppWindow inherits Window {
                             spacing: Theme.spacing;
                             Text { text: "Source 1 : " + (root.source-1 == "" ? "(aucune)" : root.source-1); wrap: no-wrap; overflow: elide; font-size: Theme.font-small; color: Palette.alternate-foreground; }
                             Text { text: "Source 2 : " + (root.source-2 == "" ? "(aucune)" : root.source-2); wrap: no-wrap; overflow: elide; font-size: Theme.font-small; color: Palette.alternate-foreground; }
-                            Text { text: "Dossier : " + (root.output-dir == "" ? "(non défini)" : root.output-dir); wrap: no-wrap; overflow: elide; font-size: Theme.font-small; color: Palette.alternate-foreground; }
-                            Text { text: "Fichier : " + (root.output-name == "" ? "(non défini)" : root.output-name); wrap: no-wrap; overflow: elide; font-size: Theme.font-small; color: Palette.alternate-foreground; }
+                            Text { text: "Sortie : " + (root.output-path == "" ? "(non défini)" : root.output-path); wrap: no-wrap; overflow: elide; font-size: Theme.font-small; color: Palette.alternate-foreground; }
                             Text { text: "Feuille : " + root.sheet-summary; font-size: Theme.font-small; color: Palette.alternate-foreground; }
                             Text { text: "Orientation feuille : " + (root.sheet-orientation-index == 0 ? "Auto" : (root.sheet-orientation-index == 1 ? "Portrait" : "Paysage")); font-size: Theme.font-small; color: Palette.alternate-foreground; }
                             Text { text: "Rotation des versos : " + (root.rotate-verso ? "Oui" : "Non"); font-size: Theme.font-small; color: Palette.alternate-foreground; }
