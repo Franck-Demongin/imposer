@@ -126,10 +126,12 @@ Crop marks are derived from unique trim-box edges after optional 90° rotation:
 ## Release Workflow
 
 Tag pushes matching `v*` trigger `.github/workflows/release.yml`, which builds
-Windows (`imposer.exe`) and Linux (`imposer`) binaries, creates a release named
-`Imposer <tag>` with commit-derived notes since the previous tag, and uploads
-both executables. The Windows build generates the release notes; the Linux build
-runs afterwards and adds its executable to the same release.
+Windows (`imposer.exe`, `imposer-gui.exe`) and Linux (`imposer`, `imposer-gui`),
+creates `imposer-<tag>-windows-x86_64.zip` and
+`imposer-<tag>-linux-x86_64.tar.gz`, generates commit-derived notes since the
+previous tag, computes per-archive and combined SHA-256 checksums, and publishes
+all assets in one GitHub release. The Linux archive also includes the `.desktop`
+entry corresponding to the Slint XDG application ID.
 
 ## Repository Notes
 

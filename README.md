@@ -93,9 +93,12 @@ Ghostscript doit être installé pour générer des sources RVB ; `gswin64c.exe`
 
 ### Télécharger une version
 
-Récupérez l'exécutable correspondant au système depuis la page Release de GitHub :
-sous Windows, `imposer.exe` et `imposer-gui.exe`; sous Linux, `imposer` et
-`imposer-gui`.
+Récupérez l'archive correspondant au système sur la page Release de GitHub :
+sous Windows, `imposer-<version>-windows-x86_64.zip`, qui contient `imposer.exe` et
+`imposer-gui.exe` ; sous Linux, `imposer-<version>-linux-x86_64.tar.gz`, qui contient
+`imposer`, `imposer-gui` et `io.github.Franck-Demongin.Imposer.desktop`. Chaque
+archive contient aussi `README.md` et `LICENSE` ; les sommes de contrôle des
+archives sont présentes dans `SHA256SUMS`.
 
 Les binaires Linux téléchargés peuvent utiliser l'intégration bureau livrée avec
 le dépôt, depuis un clone du dépôt :
@@ -418,9 +421,13 @@ desktop-file-validate packaging/linux/io.github.Franck-Demongin.Imposer.desktop
 La CI compile sur Ubuntu et Windows, exécute les tests, valide l'entrée bureau et
 utilise les builds verrouillés. La publication est déclenchée par un tag `v*` :
 
-1. Le job Windows construit les binaires, génère les notes depuis le tag
-   précédent, puis publie `imposer.exe` et `imposer-gui.exe`.
-2. Le job Linux dépend du précédent, puis ajoute `imposer` et `imposer-gui`.
+1. Le job Windows construit `imposer` et `imposer-gui`, puis produit l'archive
+   `imposer-<version>-windows-x86_64.zip`.
+2. Le job Linux construit les mêmes binaires, puis produit l'archive
+   `imposer-<version>-linux-x86_64.tar.gz`.
+3. Le job de publication télécharge les deux archives, calcule un fichier combiné
+   `SHA256SUMS`, génère les notes depuis le tag précédent et publie le tout
+   dans une même release.
 
 Les builds natifs ciblent `windows-latest` et `ubuntu-latest`. Les artefacts sont
 tous attachés à la même release. La CI vérifie aussi les fichiers requis, l'APP_ID

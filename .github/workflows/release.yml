@@ -6,16 +6,108 @@ on:
       - "v*"
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  build-windows:
-    runs-on: windows-latest
+  build:
+    name: build (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux
+            os: ubuntu-latest
+            archive: tar.gz
+          - platform: windows
+            os: windows-latest
+            archive: zip
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4 # v4
+
+      - name: Install Slint Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          PACKAGES=(build-essential pkg-config libx11-dev libxkbcommon-dev libwayland-dev)
+          if apt-cache show libfontconfig-dev >/dev/null 2>&1; then PACKAGES+=(libfontconfig-dev); else PACKAGES+=(libfontconfig1-dev); fi
+          if apt-cache show libfreetype-dev >/dev/null 2>&1; then PACKAGES+=(libfreetype-dev); else PACKAGES+=(libfreetype6-dev); fi
+          if apt-cache show libgl-dev >/dev/null 2>&1; then PACKAGES+=(libgl-dev); else PACKAGES+=(libgl1-mesa-dev); fi
+          sudo apt-get install -y "${PACKAGES[@]}"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@v1 # latest stable channel, action major tag v1
+        with:
+          toolchain: stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2.9.3 # v2.9.3
+        with:
+          key: ${{ runner.os }}-release-cargo
+
+      - name: Build command-line interface
+        run: cargo build --release --locked --bin imposer
+
+      - name: Build Slint GUI
+        run: cargo build --release --locked --features slint-ui --bin imposer-gui
+
+      - name: Package Linux
+        if: matrix.platform == 'linux'
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          STAGE="imposer-${VERSION}-linux-x86_64"
+          rm -rf "dist/${STAGE}" && mkdir -p "dist/${STAGE}"
+          cp ./target/release/imposer "dist/${STAGE}/"
+          cp ./target/release/imposer-gui "dist/${STAGE}/"
+          cp ./README.md ./LICENSE "dist/${STAGE}/"
+          cp ./packaging/linux/io.github.Franck-Demongin.Imposer.desktop "dist/${STAGE}/"
+          tar -czf "dist/${STAGE}.tar.gz" -C dist "${STAGE}"
+          (cd dist && sha256sum "${STAGE}.tar.gz" > "${STAGE}.tar.gz.sha256")
+          rm -rf "dist/${STAGE}"
+
+      - name: Package Windows
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $version = $Env:GITHUB_REF_NAME -replace '^v',''
+          $stage = "imposer-$version-windows-x86_64"
+          $dist = "dist/$stage"
+          New-Item -ItemType Directory -Force -Path $dist | Out-Null
+          Copy-Item "./target/release/imposer.exe" "$dist/"
+          Copy-Item "./target/release/imposer-gui.exe" "$dist/"
+          Copy-Item "./README.md" "$dist/"
+          Copy-Item "./LICENSE" "$dist/"
+          $archive = "dist/$stage.zip"
+          Compress-Archive -Path "$dist/*" -DestinationPath $archive
+          $hash = (Get-FileHash -Algorithm SHA256 -Path $archive).Hash.ToLowerInvariant()
+          Set-Content -Path "$archive.sha256" -NoNewline -Value "$hash  $(Split-Path $archive -Leaf)"
+          Remove-Item -Recurse -Force $dist
+
+      - name: Upload release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: imposer-${{ matrix.platform }}-build
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@stable
+
       - name: Generate release notes
         shell: bash
         run: |
@@ -33,31 +125,27 @@ jobs:
             fi
             printf '\n'
           } > release_notes.md
-      - run: cargo build --release --bin imposer
-      - run: cargo build --release --features slint-ui --bin imposer-gui
-      - uses: softprops/action-gh-release@v2
+
+      - name: Download release assets
+        uses: actions/download-artifact@v4
         with:
+          path: release-input
+
+      - name: Assemble and checksum assets
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          find release-input -type f -exec mv {} release/ \;
+          find release -type d -empty -delete
+          find release -maxdepth 1 -type f ! -name SHA256SUMS -exec sha256sum {} + > release/SHA256SUMS
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          name: Imposer ${{ github.ref_name }}
           name: Imposer ${{ github.ref_name }}
           body_path: release_notes.md
-          files: |
-            target/release/imposer.exe
-            target/release/imposer-gui.exe
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  build-linux:
-    runs-on: ubuntu-latest
-    needs: build-windows
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - run: cargo build --release --bin imposer
-      - run: cargo build --release --features slint-ui --bin imposer-gui
-      - uses: softprops/action-gh-release@v2
-        with:
-          name: Imposer ${{ github.ref_name }}
-          files: |
-            target/release/imposer
-            target/release/imposer-gui
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          files: release/*
+          fail_on_unmatched_files: true
