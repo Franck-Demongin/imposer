@@ -856,12 +856,6 @@ pub fn run() -> Result<()> {
     }
 
     refresh_preview(&ui);
-    enqueue_snackbar(
-        &ui,
-        &snackbar_state,
-        "Prêt. Sélectionnez jusqu'à 2 sources puis cliquez sur Générer.".to_owned(),
-        0,
-    );
 
     ui.run()
         .map_err(|e| ImposerError::Generation(e.to_string()))?;
