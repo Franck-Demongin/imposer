@@ -8,12 +8,15 @@ export struct PreviewPlacement {
 }
 
 export global Theme {
-    out property <length> spacing-s: 6px;
-    out property <length> spacing-m: 12px;
-    out property <length> spacing-l: 20px;
-    out property <length> radius: 6px;
+    out property <length> spacing: 8px;
+    out property <length> corner-radius: 6px;
     out property <length> font-secondary: 11px;
     out property <length> font-small: 12px;
+
+    out property <length> window-preferred-width: 1100px;
+    out property <length> window-preferred-height: 720px;
+    out property <length> window-min-width: 760px;
+    out property <length> window-min-height: 520px;
 }
 
 component Card inherits Rectangle {
@@ -22,11 +25,11 @@ component Card inherits Rectangle {
     background: Palette.alternate-background;
     border-width: 1px;
     border-color: Palette.border;
-    border-radius: Theme.radius;
+    border-radius: Theme.corner-radius;
 
     VerticalLayout {
-        padding: Theme.spacing-m;
-        spacing: Theme.spacing-m;
+        padding: Theme.spacing;
+        spacing: Theme.spacing;
         alignment: start;
 
         if root.title != "": Text {
@@ -41,8 +44,8 @@ component Card inherits Rectangle {
 }
 
 component PopupButtonRow inherits HorizontalLayout {
-    spacing: Theme.spacing-m;
-    padding-top: Theme.spacing-s;
+    spacing: Theme.spacing;
+    padding-top: Theme.spacing;
     alignment: end;
     vertical-stretch: 0;
 
@@ -91,11 +94,11 @@ component ModalDialog inherits FocusScope {
         background: Palette.alternate-background;
         border-width: 1px;
         border-color: Palette.border;
-        border-radius: Theme.radius;
+        border-radius: Theme.corner-radius;
 
         VerticalLayout {
-            padding: Theme.spacing-s;
-            spacing: Theme.spacing-s;
+            padding: Theme.spacing;
+            spacing: Theme.spacing;
             alignment: stretch;
 
             @children
@@ -180,12 +183,42 @@ export component AppWindow inherits Window {
         VerticalLayout {
             width: 100%;
             height: 100%;
-            padding: Theme.spacing-m;
-            spacing: Theme.spacing-m;
+            padding: Theme.spacing;
+            spacing: Theme.spacing;
             alignment: stretch;
 
+            HorizontalBox {
+                vertical-stretch: 0;
+                alignment: stretch;
+                spacing: Theme.spacing;
+
+                Image {
+                    source: @image-url("../assets/icons/imposer-64.png");
+                    width: 48px;
+                    height: 48px;
+                    image-fit: contain;
+                }
+
+                VerticalBox {
+                    padding: 0px;
+                    spacing: 0px;
+
+                    Text {
+                        text: "Imposer";
+                        font-size: 16px;
+                        font-weight: 700;
+                    }
+                    Text {
+                        text: "Imposition de documents PDF, PNG, JPEG et PSD";
+                        font-size: 12px;
+                        color: Palette.foreground;
+                        horizontal-alignment: left;
+                    }
+                }
+            }
+
             HorizontalLayout {
-                spacing: Theme.spacing-m;
+                spacing: Theme.spacing;
                 vertical-stretch: 1;
 
             ScrollView {
@@ -195,15 +228,15 @@ export component AppWindow inherits Window {
                 horizontal-scrollbar-policy: ScrollBarPolicy.as-needed;
 
                 VerticalLayout {
-                    spacing: Theme.spacing-m;
+                    spacing: Theme.spacing;
                     alignment: start;
                     horizontal-stretch: 1;
 
                     Card {
                         title: "Sources (max. 2)";
                         GridLayout {
-                            spacing-horizontal: Theme.spacing-s;
-                            spacing-vertical: Theme.spacing-s;
+                            spacing-horizontal: Theme.spacing;
+                            spacing-vertical: Theme.spacing;
 
                             Text { text: "Recto"; row: 0; col: 0; vertical-alignment: center; }
                             LineEdit { text: root.source-1; read-only: true; row: 0; col: 1; horizontal-stretch: 1; }
@@ -215,7 +248,7 @@ export component AppWindow inherits Window {
                         }
                         HorizontalLayout {
                             alignment: end;
-                            spacing: Theme.spacing-s;
+                            spacing: Theme.spacing;
                             Button { text: "Retirer la dernière"; icon: @image-url("../assets/icons/ui/delete.svg"); icon-size: 16px; colorize-icon: true; enabled: !root.busy; clicked => { root.remove-last-source(); } }
                         }
                     }
@@ -223,8 +256,8 @@ export component AppWindow inherits Window {
                     Card {
                         title: "Sortie";
                         GridLayout {
-                            spacing-horizontal: Theme.spacing-s;
-                            spacing-vertical: Theme.spacing-s;
+                            spacing-horizontal: Theme.spacing;
+                            spacing-vertical: Theme.spacing;
 
                             Text { text: "Dossier"; row: 0; col: 0; vertical-alignment: center; }
                             LineEdit { text <=> root.output-dir; row: 0; col: 1; horizontal-stretch: 1; }
@@ -238,14 +271,14 @@ export component AppWindow inherits Window {
                     Card {
                         title: "Options";
                         GridLayout {
-                            spacing-horizontal: Theme.spacing-s;
-                            spacing-vertical: Theme.spacing-s;
+                            spacing-horizontal: Theme.spacing;
+                            spacing-vertical: Theme.spacing;
 
                             Text { text: "Feuille — " + root.selected-sheet-name; row: 0; col: 0; }
                             Text { text: "Orientation feuille"; row: 0; col: 1; }
 
                             HorizontalLayout {
-                                row: 1; col: 0; spacing: Theme.spacing-s;
+                                row: 1; col: 0; spacing: Theme.spacing;
                                 ComboBox {
                                     model: root.sheet-options;
                                     current-index <=> root.sheet-index;
@@ -298,7 +331,7 @@ export component AppWindow inherits Window {
                 horizontal-scrollbar-policy: ScrollBarPolicy.as-needed;
 
                 VerticalLayout {
-                    spacing: Theme.spacing-m;
+                    spacing: Theme.spacing;
                     alignment: start;
                     horizontal-stretch: 1;
 
@@ -311,7 +344,7 @@ export component AppWindow inherits Window {
                             background: Palette.control-background;
                             border-width: 1px;
                             border-color: Palette.border;
-                            border-radius: Theme.radius;
+                            border-radius: Theme.corner-radius;
                             clip: true;
 
                             for placement in root.preview-placements: Rectangle {
@@ -329,7 +362,7 @@ export component AppWindow inherits Window {
                     Card {
                         title: "Récapitulatif";
                         VerticalLayout {
-                            spacing: Theme.spacing-s;
+                            spacing: Theme.spacing;
                             Text { text: "Source 1 : " + (root.source-1 == "" ? "(aucune)" : root.source-1); wrap: no-wrap; overflow: elide; font-size: Theme.font-small; color: Palette.alternate-foreground; }
                             Text { text: "Source 2 : " + (root.source-2 == "" ? "(aucune)" : root.source-2); wrap: no-wrap; overflow: elide; font-size: Theme.font-small; color: Palette.alternate-foreground; }
                             Text { text: "Dossier : " + (root.output-dir == "" ? "(non défini)" : root.output-dir); wrap: no-wrap; overflow: elide; font-size: Theme.font-small; color: Palette.alternate-foreground; }
@@ -344,7 +377,7 @@ export component AppWindow inherits Window {
                     }
 
                     Rectangle {
-                        height: Theme.spacing-m;
+                        height: Theme.spacing;
                     }
 
                     Text {
@@ -363,8 +396,8 @@ export component AppWindow inherits Window {
         }
 
         HorizontalLayout {
-            spacing: Theme.spacing-m;
-            padding-top: Theme.spacing-s;
+            spacing: Theme.spacing;
+            padding-top: Theme.spacing;
 
             Text {
                 text: root.status;
@@ -386,8 +419,8 @@ export component AppWindow inherits Window {
 
 
         if root.output-ready: HorizontalLayout {
-            spacing: Theme.spacing-m;
-            padding-top: Theme.spacing-s;
+            spacing: Theme.spacing;
+            padding-top: Theme.spacing;
             alignment: end;
 
             Button {
