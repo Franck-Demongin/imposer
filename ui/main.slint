@@ -460,6 +460,25 @@ export component AppWindow inherits Window {
             spacing: Theme.spacing;
             padding-top: Theme.spacing;
 
+            if root.output-ready: Button {
+                text: "Ouvrir le fichier";
+                icon: @image-url("../assets/icons/ui/file-open.svg");
+                icon-size: 16px;
+                colorize-icon: true;
+                enabled: !root.busy;
+                min-width: 150px;
+                clicked => { root.open-output-file(); }
+            }
+            if root.output-ready: Button {
+                text: "Ouvrir le dossier";
+                icon: @image-url("../assets/icons/ui/folder-open.svg");
+                icon-size: 16px;
+                colorize-icon: true;
+                enabled: !root.busy;
+                min-width: 150px;
+                clicked => { root.open-output-folder(); }
+            }
+
             Rectangle {
                 horizontal-stretch: 1;
             }
@@ -470,32 +489,6 @@ export component AppWindow inherits Window {
                 primary: true;
                 min-width: 160px;
                 clicked => { root.generate(); }
-            }
-        }
-
-
-        if root.output-ready: HorizontalLayout {
-            spacing: Theme.spacing;
-            padding-top: Theme.spacing;
-            alignment: end;
-
-            Button {
-                text: "Ouvrir le fichier";
-                icon: @image-url("../assets/icons/ui/file-open.svg");
-                icon-size: 16px;
-                colorize-icon: true;
-                enabled: !root.busy;
-                min-width: 150px;
-                clicked => { root.open-output-file(); }
-            }
-            Button {
-                text: "Ouvrir le dossier";
-                icon: @image-url("../assets/icons/ui/folder-open.svg");
-                icon-size: 16px;
-                colorize-icon: true;
-                enabled: !root.busy;
-                min-width: 150px;
-                clicked => { root.open-output-folder(); }
             }
         }
 
