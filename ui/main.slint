@@ -178,8 +178,8 @@ export component AppWindow inherits Window {
     in property <bool> busy: false;
 
     in property <[SnackbarItem]> snackbar-items: [];
-    in property <string> source-1: "";
-    in property <string> source-2: "";
+    in-out property <string> source-1: "";
+    in-out property <string> source-2: "";
 
     in-out property <string> output-path: "";
 
@@ -299,11 +299,11 @@ export component AppWindow inherits Window {
                             spacing-vertical: Theme.spacing;
 
                             Text { text: "Recto"; row: 0; col: 0; vertical-alignment: center; }
-                            LineEdit { text: root.source-1; read-only: true; row: 0; col: 1; horizontal-stretch: 1; }
+                            LineEdit { text <=> root.source-1; row: 0; col: 1; horizontal-stretch: 1; edited => { root.refresh-preview(); } }
                             Button { text: "Parcourir…"; icon: @image-url("../assets/icons/ui/file-open.svg"); icon-size: 16px; colorize-icon: true; enabled: !root.busy; row: 0; col: 2; min-width: 100px; clicked => { root.browse-source-one(); } }
 
                             Text { text: "Verso"; row: 1; col: 0; vertical-alignment: center; }
-                            LineEdit { text: root.source-2; read-only: true; row: 1; col: 1; horizontal-stretch: 1; }
+                            LineEdit { text <=> root.source-2; row: 1; col: 1; horizontal-stretch: 1; edited => { root.refresh-preview(); } }
                             Button { text: "Parcourir…"; icon: @image-url("../assets/icons/ui/file-open.svg"); icon-size: 16px; colorize-icon: true; enabled: !root.busy; row: 1; col: 2; min-width: 100px; clicked => { root.browse-source-two(); } }
                         }
                         HorizontalLayout {
