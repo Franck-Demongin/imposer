@@ -1,6 +1,6 @@
 [package]
 name = "imposer"
-version = "0.8.4"
+version = "0.8.5"
 edition = "2024"
 rust-version = "1.85"
 description = "Imposition de documents PDF, PNG, JPEG et PSD sur des planches aux formats A4, A3 et SRA3"
