@@ -1,70 +1,13 @@
 import { Button, ComboBox, CheckBox, LineEdit, VerticalBox, HorizontalBox, ScrollView, Palette } from "std-widgets.slint";
+import { ToastOverlay } from "toast/toast.slint";
+
+export { ToastTiming, ToastState } from "toast/toast.slint";
 
 export struct PreviewPlacement {
     x: float,
     y: float,
     w: float,
     h: float
-}
-
-export struct SnackbarItem {
-    text: string,
-    level: int,
-    id: int,
-}
-
-component Snackbar inherits Rectangle {
-    in property <string> text: "";
-    in property <int> level: 0;
-    in property <int> id: 0;
-
-    callback close-requested();
-
-    background: self.level == 2 ? #e53935 : (self.level == 1 ? #f08c00 : #2e9f54);
-    border-color: self.level == 2 ? #9b000e : (self.level == 1 ? #a66100 : #1d6f3a);
-    border-width: 1px;
-    border-radius: Theme.corner-radius;
-    height: self.preferred-height;
-
-    HorizontalBox {
-        padding: Theme.spacing;
-        spacing: Theme.spacing;
-        alignment: stretch;
-
-        Text {
-            text: root.text;
-            color: root.level == 2 ? #ffffff : (root.level == 1 ? #111111 : #ffffff);
-            wrap: word-wrap;
-            horizontal-alignment: left;
-            vertical-alignment: top;
-            horizontal-stretch: 1;
-        }
-
-        Rectangle {
-            width: 24px;
-            height: 24px;
-            horizontal-stretch: 0;
-            border-radius: 12px;
-            background: root.level == 2 ? #9b000e : (root.level == 1 ? #a66100 : #1d6f3a);
-
-            Image {
-                x: 5px;
-                y: 5px;
-                width: 14px;
-                height: 14px;
-                source: @image-url("../assets/icons/ui/close.svg");
-                image-fit: contain;
-            }
-
-            TouchArea {
-                width: 24px;
-                height: 24px;
-                clicked => {
-                    root.close-requested();
-                }
-            }
-        }
-    }
 }
 
 export global Theme {
@@ -177,7 +120,6 @@ export component AppWindow inherits Window {
 
     in property <bool> busy: false;
 
-    in property <[SnackbarItem]> snackbar-items: [];
     in-out property <string> source-1: "";
     in-out property <string> source-2: "";
 
@@ -222,7 +164,6 @@ export component AppWindow inherits Window {
 
     callback browse-source-one();
     callback browse-source-two();
-    callback close-snackbar(int);
     callback browse-output();
     callback generate();
     callback open-output-file();
@@ -484,23 +425,9 @@ export component AppWindow inherits Window {
     }
 
 
-    Rectangle {
-        visible: root.snackbar-items.length > 0;
-        width: min(360px, max(0px, root.width - Theme.spacing * 4));
-        height: self.preferred-height;
-        x: max(Theme.spacing * 2, root.width - self.width - Theme.spacing * 2);
-        y: Theme.spacing * 2;
-        background: transparent;
-
-        VerticalBox {
-            spacing: Theme.spacing;
-            for i in root.snackbar-items.length : Snackbar {
-                text: root.snackbar-items[root.snackbar-items.length - 1 - i].text;
-                level: root.snackbar-items[root.snackbar-items.length - 1 - i].level;
-                id: root.snackbar-items[root.snackbar-items.length - 1 - i].id;
-                close-requested => { root.close-snackbar(self.id); }
-            }
-        }
+    ToastOverlay {
+        available-width: root.width;
+        spacing: Theme.spacing;
     }
 
     if root.custom-open: ModalDialog {

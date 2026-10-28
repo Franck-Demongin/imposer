@@ -1,0 +1,128 @@
+import { VerticalBox, HorizontalBox } from "std-widgets.slint";
+
+export global ToastTiming {
+    out property <duration> enter: 250ms;
+    out property <duration> exit: 200ms;
+}
+
+export struct ToastItem {
+    text: string,
+    level: int,
+    id: int,
+    closing: bool,
+}
+
+export global ToastState {
+    in property <[ToastItem]> items;
+    callback close-requested(int);
+}
+
+export component Toast inherits Rectangle {
+    in property <string> text: "";
+    in property <int> level: 0;
+    in property <int> id: 0;
+
+    in property <bool> closing: false;
+    property <bool> entered: false;
+    init => { root.entered = true; }
+
+    callback close-requested();
+
+    in property <length> spacing: 8px;
+    in property <length> corner-radius: 6px;
+
+    in property <image> close-icon: @image-url("../../assets/icons/ui/close.svg");
+
+    property <bool> shown: root.entered && !root.closing;
+
+    clip: true;
+    height: root.shown ? box.preferred-height + root.spacing : 0px;
+
+    animate height {
+        duration: root.shown ? ToastTiming.enter : ToastTiming.exit;
+    }
+
+    Rectangle {
+        width: parent.width;
+        height: box.preferred-height;
+        x: root.shown ? 0px : 48px;
+        opacity: root.shown ? 1.0 : 0.0;
+
+        background: root.level == 2 ? #e53935 : (root.level == 1 ? #f08c00 : #2e9f54);
+        border-color: root.level == 2 ? #9b000e : (root.level == 1 ? #a66100 : #1d6f3a);
+        border-width: 1px;
+        border-radius: root.corner-radius;
+
+        animate x {
+            duration: root.shown ? ToastTiming.enter : ToastTiming.exit;
+        }
+        animate opacity {
+            duration: root.shown ? ToastTiming.enter : ToastTiming.exit;
+        }
+
+        box := HorizontalBox {
+            padding: root.spacing;
+            spacing: root.spacing;
+            alignment: stretch;
+
+            Text {
+                text: root.text;
+                color: root.level == 2 ? #ffffff : (root.level == 1 ? #111111 : #ffffff);
+                wrap: word-wrap;
+                horizontal-alignment: left;
+                vertical-alignment: top;
+                horizontal-stretch: 1;
+            }
+
+            Rectangle {
+                width: 24px;
+                height: 24px;
+                horizontal-stretch: 0;
+                border-radius: 12px;
+                background: root.level == 2 ? #9b000e : (root.level == 1 ? #a66100 : #1d6f3a);
+
+                Image {
+                    x: 5px;
+                    y: 5px;
+                    width: 14px;
+                    height: 14px;
+                    source: root.close-icon;
+                    image-fit: contain;
+                }
+
+                TouchArea {
+                    width: 24px;
+                    height: 24px;
+                    enabled: !root.closing;
+                    clicked => {
+                        root.close-requested();
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component ToastOverlay inherits Rectangle {
+    in property <length> available-width: 860px;
+    in property <length> spacing: 8px;
+
+    visible: ToastState.items.length > 0;
+    width: min(360px, max(0px, root.available-width - root.spacing * 4));
+    height: self.preferred-height;
+    x: max(root.spacing * 2, root.available-width - self.width - root.spacing * 2);
+    y: root.spacing * 2;
+    background: transparent;
+
+    VerticalBox {
+        spacing: 0px;
+        for item in ToastState.items : Toast {
+            text: item.text;
+            level: item.level;
+            id: item.id;
+            closing: item.closing;
+            spacing: root.spacing;
+            close-requested => { ToastState.close-requested(item.id); }
+        }
+    }
+}

@@ -8,6 +8,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+mod toast;
+use toast::{ToastLevel, Toaster};
+
 slint::include_modules!();
 
 pub const APP_ID: &str = "io.github.Franck-Demongin.Imposer";
@@ -25,20 +28,13 @@ pub fn run() -> Result<()> {
     ui.set_app_title(format!("Imposer - v{}", env!("CARGO_PKG_VERSION")).into());
     let weak_ui = ui.as_weak();
 
-    let snackbar_state = std::rc::Rc::new(std::cell::RefCell::new(SnackbarQueue::default()));
-    let close_snackbar_weak = weak_ui.clone();
-    let close_snackbar_state = snackbar_state.clone();
-    ui.on_close_snackbar(move |toast_id| {
-        if let Some(ui) = close_snackbar_weak.upgrade() {
-            dismiss_snackbar(&ui, &close_snackbar_state, toast_id);
-        }
-    });
+    let toaster = Toaster::install(&ui);
 
     let busy_rx: Arc<Mutex<Option<BusyReceiver>>> = Arc::new(Mutex::new(None));
 
     let timer_weak = weak_ui.clone();
     let timer_rx = busy_rx.clone();
-    let timer_state = snackbar_state.clone();
+    let timer_toaster = toaster.clone();
     let timer = slint::Timer::default();
     timer.start(
         slint::TimerMode::Repeated,
@@ -56,7 +52,7 @@ pub fn run() -> Result<()> {
                 && let Ok((status, output_path)) = rx.try_recv()
             {
                 let level = if status.starts_with("Erreur") { 2 } else { 0 };
-                enqueue_snackbar(&ui, &timer_state, status, level);
+                enqueue_snackbar(&ui, &timer_toaster, status, level);
                 if let Some(path) = output_path {
                     ui.set_last_output_path(path.to_string_lossy().to_string().into());
                     ui.set_output_ready(true);
@@ -115,7 +111,7 @@ pub fn run() -> Result<()> {
 
     {
         let weak = weak_ui.clone();
-        let snackbar_state = snackbar_state.clone();
+        let toaster = toaster.clone();
         ui.on_browse_source_one(move || {
             let ui = match weak.upgrade() {
                 Some(ui) => ui,
@@ -132,12 +128,7 @@ pub fn run() -> Result<()> {
             };
             let source = path.display().to_string();
             if ui.get_source_2() == source.as_str() {
-                enqueue_snackbar(
-                    &ui,
-                    &snackbar_state,
-                    "Source déjà sélectionnée.".to_owned(),
-                    0,
-                );
+                enqueue_snackbar(&ui, &toaster, "Source déjà sélectionnée.".to_owned(), 0);
                 return;
             }
             ui.set_source_1(source.into());
@@ -149,7 +140,7 @@ pub fn run() -> Result<()> {
     // Source 2
     {
         let weak = weak_ui.clone();
-        let snackbar_state = snackbar_state.clone();
+        let toaster = toaster.clone();
         ui.on_browse_source_two(move || {
             let ui = match weak.upgrade() {
                 Some(ui) => ui,
@@ -166,12 +157,7 @@ pub fn run() -> Result<()> {
             };
             let source = path.display().to_string();
             if ui.get_source_1() == source.as_str() {
-                enqueue_snackbar(
-                    &ui,
-                    &snackbar_state,
-                    "Source déjà sélectionnée.".to_owned(),
-                    0,
-                );
+                enqueue_snackbar(&ui, &toaster, "Source déjà sélectionnée.".to_owned(), 0);
                 return;
             }
             ui.set_source_2(source.into());
@@ -376,7 +362,7 @@ pub fn run() -> Result<()> {
     {
         let weak = weak_ui.clone();
         let state = sheet_choices_state.clone();
-        let snackbar_state = snackbar_state.clone();
+        let toaster = toaster.clone();
         ui.on_save_preset_confirm(move || {
             let ui = match weak.upgrade() {
                 Some(ui) => ui,
@@ -476,7 +462,7 @@ pub fn run() -> Result<()> {
                             );
                             enqueue_snackbar(
                                 &ui,
-                                &snackbar_state,
+                                &toaster,
                                 format!(
                                     "Format enregistré: {} ({:.0} x {:.0} mm).",
                                     user_preset.name, width, height
@@ -568,7 +554,7 @@ pub fn run() -> Result<()> {
     {
         let weak = weak_ui.clone();
         let state = sheet_choices_state.clone();
-        let snackbar_state = snackbar_state.clone();
+        let toaster = toaster.clone();
         ui.on_delete_preset_confirm(move || {
             let ui = match weak.upgrade() {
                 Some(ui) => ui,
@@ -642,7 +628,7 @@ pub fn run() -> Result<()> {
             ui.set_delete_preset_error("".into());
             enqueue_snackbar(
                 &ui,
-                &snackbar_state,
+                &toaster,
                 format!("Format supprimé: {}", target_name),
                 0,
             );
@@ -653,19 +639,14 @@ pub fn run() -> Result<()> {
     {
         let weak = weak_ui.clone();
         let rx_state = busy_rx.clone();
-        let snackbar_state = snackbar_state.clone();
+        let toaster = toaster.clone();
         ui.on_generate(move || {
             let ui = match weak.upgrade() {
                 Some(ui) => ui,
                 None => return,
             };
             if ui.get_busy() {
-                enqueue_snackbar(
-                    &ui,
-                    &snackbar_state,
-                    "Génération déjà en cours...".to_owned(),
-                    1,
-                );
+                enqueue_snackbar(&ui, &toaster, "Génération déjà en cours...".to_owned(), 1);
                 return;
             }
 
@@ -682,7 +663,7 @@ pub fn run() -> Result<()> {
             if source_paths.is_empty() {
                 enqueue_snackbar(
                     &ui,
-                    &snackbar_state,
+                    &toaster,
                     "Aucun fichier source sélectionné.".to_owned(),
                     2,
                 );
@@ -693,12 +674,7 @@ pub fn run() -> Result<()> {
             let destination = match resolve_output_path(&output_path_raw) {
                 Some(path) => path,
                 None => {
-                    enqueue_snackbar(
-                        &ui,
-                        &snackbar_state,
-                        "Chemin de sortie invalide.".to_owned(),
-                        2,
-                    );
+                    enqueue_snackbar(&ui, &toaster, "Chemin de sortie invalide.".to_owned(), 2);
                     return;
                 }
             };
@@ -713,7 +689,7 @@ pub fn run() -> Result<()> {
             {
                 enqueue_snackbar(
                     &ui,
-                    &snackbar_state,
+                    &toaster,
                     format!("Impossible de créer le dossier {}: {e}", parent.display()),
                     2,
                 );
@@ -725,7 +701,7 @@ pub fn run() -> Result<()> {
                 _ => {
                     enqueue_snackbar(
                         &ui,
-                        &snackbar_state,
+                        &toaster,
                         "Dimensions de feuille invalides.".to_owned(),
                         2,
                     );
@@ -737,7 +713,7 @@ pub fn run() -> Result<()> {
                 _ => {
                     enqueue_snackbar(
                         &ui,
-                        &snackbar_state,
+                        &toaster,
                         "Dimensions de feuille invalides.".to_owned(),
                         2,
                     );
@@ -753,19 +729,14 @@ pub fn run() -> Result<()> {
             let bleed = match ui.get_bleed_text().to_string().trim().parse::<f32>() {
                 Ok(value) if value >= 0.0 => value,
                 _ => {
-                    enqueue_snackbar(&ui, &snackbar_state, "Bord perdu invalide.".to_owned(), 2);
+                    enqueue_snackbar(&ui, &toaster, "Bord perdu invalide.".to_owned(), 2);
                     return;
                 }
             };
             let safety = match ui.get_safety_text().to_string().trim().parse::<f32>() {
                 Ok(value) if value >= 0.0 => value,
                 _ => {
-                    enqueue_snackbar(
-                        &ui,
-                        &snackbar_state,
-                        "Marge de sécurité invalide.".to_owned(),
-                        2,
-                    );
+                    enqueue_snackbar(&ui, &toaster, "Marge de sécurité invalide.".to_owned(), 2);
                     return;
                 }
             };
@@ -1057,99 +1028,13 @@ fn parse_slint_dimension(text: slint::SharedString) -> Option<f32> {
     }
 }
 
-#[derive(Default)]
-struct SnackbarNotice {
-    text: String,
-    level: i32,
-}
-
-#[allow(dead_code)]
-#[derive(Default)]
-struct SnackbarQueue {
-    pending: std::collections::VecDeque<SnackbarNotice>,
-    active: Option<SnackbarNotice>,
-    stack: std::collections::VecDeque<SnackbarNotice>,
-    ids: std::collections::VecDeque<u32>,
-    next_id: u32,
-}
-
-impl SnackbarQueue {
-    fn push_toast(&mut self, notice: SnackbarNotice) -> u32 {
-        const MAX_VISIBLE_TOASTS: usize = 3;
-        while self.stack.len() >= MAX_VISIBLE_TOASTS {
-            self.stack.pop_front();
-            self.ids.pop_front();
-        }
-        let id = self.next_id;
-        self.next_id = self.next_id.wrapping_add(1);
-        self.stack.push_back(notice);
-        self.ids.push_back(id);
-        id
-    }
-
-    fn remove_toast(&mut self, id: u32) -> bool {
-        if let Some(index) = self.ids.iter().position(|value| *value == id) {
-            self.stack.remove(index);
-            self.ids.remove(index);
-            true
-        } else {
-            false
-        }
-    }
-}
-
-fn enqueue_snackbar(
-    ui: &AppWindow,
-    state: &std::rc::Rc<std::cell::RefCell<SnackbarQueue>>,
-    text: String,
-    level: i32,
-) {
-    let notice = SnackbarNotice { text, level };
-    let id = state.borrow_mut().push_toast(notice);
-    sync_snackbar_stack(ui, state);
-    schedule_auto_dismiss(ui.as_weak(), state.clone(), id);
-}
-
-fn sync_snackbar_stack(ui: &AppWindow, state: &std::rc::Rc<std::cell::RefCell<SnackbarQueue>>) {
-    let snapshot = state.borrow();
-    let items: Vec<SnackbarItem> = snapshot
-        .ids
-        .iter()
-        .zip(snapshot.stack.iter())
-        .map(|(id, notice)| SnackbarItem {
-            text: notice.text.clone().into(),
-            level: notice.level,
-            id: *id as i32,
-        })
-        .collect();
-    ui.set_snackbar_items(slint::ModelRc::new(std::rc::Rc::new(
-        slint::VecModel::from(items),
-    )));
-}
-
-fn dismiss_snackbar(
-    ui: &AppWindow,
-    state: &std::rc::Rc<std::cell::RefCell<SnackbarQueue>>,
-    toast_id: i32,
-) {
-    let removed = state.borrow_mut().remove_toast(toast_id as u32);
-    if removed {
-        sync_snackbar_stack(ui, state);
-    }
-}
-
-fn schedule_auto_dismiss(
-    ui: slint::Weak<AppWindow>,
-    state: std::rc::Rc<std::cell::RefCell<SnackbarQueue>>,
-    id: u32,
-) {
-    slint::Timer::single_shot(std::time::Duration::from_secs(4), move || {
-        if let Some(ui) = ui.upgrade() {
-            let still_present = state.borrow().ids.contains(&id);
-            if !still_present {
-                return;
-            }
-            dismiss_snackbar(&ui, &state, id as i32);
-        }
-    });
+fn enqueue_snackbar(_ui: &AppWindow, toaster: &Toaster, text: String, level: i32) {
+    toaster.show(
+        text,
+        match level {
+            2 => ToastLevel::Error,
+            1 => ToastLevel::Warning,
+            _ => ToastLevel::Success,
+        },
+    );
 }
