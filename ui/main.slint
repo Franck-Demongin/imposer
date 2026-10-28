@@ -223,7 +223,6 @@ export component AppWindow inherits Window {
     callback browse-source-one();
     callback browse-source-two();
     callback close-snackbar(int);
-    callback remove-last-source();
     callback browse-output();
     callback generate();
     callback open-output-file();
@@ -305,11 +304,6 @@ export component AppWindow inherits Window {
                             Text { text: "Verso"; row: 1; col: 0; vertical-alignment: center; }
                             LineEdit { text <=> root.source-2; row: 1; col: 1; horizontal-stretch: 1; edited => { root.refresh-preview(); } }
                             Button { text: "Parcourir…"; icon: @image-url("../assets/icons/ui/file-open.svg"); icon-size: 16px; colorize-icon: true; enabled: !root.busy; row: 1; col: 2; min-width: 100px; clicked => { root.browse-source-two(); } }
-                        }
-                        HorizontalLayout {
-                            alignment: end;
-                            spacing: Theme.spacing;
-                            Button { text: "Retirer la dernière"; icon: @image-url("../assets/icons/ui/delete.svg"); icon-size: 16px; colorize-icon: true; enabled: !root.busy; clicked => { root.remove-last-source(); } }
                         }
                     }
 

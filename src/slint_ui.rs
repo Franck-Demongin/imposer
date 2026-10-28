@@ -180,26 +180,6 @@ pub fn run() -> Result<()> {
         });
     }
 
-    // Retirer la dernière
-    {
-        let weak = weak_ui.clone();
-        ui.on_remove_last_source(move || {
-            let ui = match weak.upgrade() {
-                Some(ui) => ui,
-                None => return,
-            };
-            if ui.get_busy() {
-                return;
-            }
-            if !ui.get_source_2().to_string().is_empty() {
-                ui.set_source_2("".into());
-            } else {
-                ui.set_source_1("".into());
-            }
-            refresh_preview(&ui);
-        });
-    }
-
     // Fichier de sortie
     {
         let weak = weak_ui.clone();
