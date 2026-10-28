@@ -2739,7 +2739,7 @@ checksum = "6e44b0a4eaa4c82f441d50a963f2d5f05a787240aeee097597033e72accfd22f"
 
 [[package]]
 name = "imposer"
-version = "0.8.5"
+version = "0.8.6"
 dependencies = [
  "chrono",
  "clap",
