@@ -203,10 +203,7 @@ pub fn run() -> Result<()> {
                     .map(|value| value.to_string_lossy().to_string())
                     .filter(|value| !value.trim().is_empty())
                     .unwrap_or_else(|| "output_imposed.pdf".to_owned());
-                let file_name = if std::path::Path::new(&file_name)
-                    .extension()
-                    .is_none()
-                {
+                let file_name = if std::path::Path::new(&file_name).extension().is_none() {
                     format!("{}.pdf", file_name)
                 } else {
                     file_name
