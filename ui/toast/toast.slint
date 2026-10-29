@@ -48,7 +48,7 @@ export component Toast inherits Rectangle {
         x: root.shown ? 0px : 48px;
         opacity: root.shown ? 1.0 : 0.0;
 
-        background: root.level == 2 ? #e53935 : (root.level == 1 ? #f08c00 : #2e9f54);
+        background: root.level == 2 ? #c01c28 : (root.level == 1 ? #d98611 : #17793a);
         border-color: root.level == 2 ? #9b000e : (root.level == 1 ? #a66100 : #1d6f3a);
         border-width: 1px;
         border-radius: root.corner-radius;
@@ -67,7 +67,7 @@ export component Toast inherits Rectangle {
 
             Text {
                 text: root.text;
-                color: root.level == 2 ? #ffffff : (root.level == 1 ? #111111 : #ffffff);
+                color: root.level == 2 ? #f6f5f4 : (root.level == 1 ? #241f31 : #f6f5f4);
                 wrap: word-wrap;
                 horizontal-alignment: left;
                 vertical-alignment: top;
@@ -79,7 +79,7 @@ export component Toast inherits Rectangle {
                 height: 24px;
                 horizontal-stretch: 0;
                 border-radius: 12px;
-                background: root.level == 2 ? #9b000e : (root.level == 1 ? #a66100 : #1d6f3a);
+                background: root.level == 2 ? #9b000e : (root.level == 1 ? #a66100 : #115227);
 
                 Image {
                     x: 5px;
