@@ -177,10 +177,53 @@ pub fn run() -> Result<()> {
             if ui.get_busy() {
                 return;
             }
-            let picked = rfd::FileDialog::new()
+
+            // Propose un nom de fichier par défaut afin que la boîte de
+            // dialogue native renvoie un chemin complet (dossier + nom).
+            let current_output = ui.get_output_path().to_string();
+            let (dialog_directory, default_name) = if current_output.trim().is_empty() {
+                let source = ui.get_source_1().to_string();
+                if source.trim().is_empty() {
+                    (None, "output_imposed.pdf".to_owned())
+                } else {
+                    let source_path = std::path::PathBuf::from(source.trim());
+                    let stem = source_path
+                        .file_stem()
+                        .map(|value| value.to_string_lossy().to_string())
+                        .unwrap_or_else(|| "output".to_owned());
+                    (
+                        source_path.parent().map(std::path::Path::to_path_buf),
+                        format!("{}_imposed.pdf", stem),
+                    )
+                }
+            } else {
+                let current_path = std::path::PathBuf::from(current_output.trim());
+                let file_name = current_path
+                    .file_name()
+                    .map(|value| value.to_string_lossy().to_string())
+                    .filter(|value| !value.trim().is_empty())
+                    .unwrap_or_else(|| "output_imposed.pdf".to_owned());
+                let file_name = if std::path::Path::new(&file_name)
+                    .extension()
+                    .is_none()
+                {
+                    format!("{}.pdf", file_name)
+                } else {
+                    file_name
+                };
+                (
+                    current_path.parent().map(std::path::Path::to_path_buf),
+                    file_name,
+                )
+            };
+
+            let mut dialog = rfd::FileDialog::new()
                 .add_filter("PDF", &["pdf"])
-                .set_title("Enregistrer le PDF généré")
-                .save_file();
+                .set_title("Enregistrer le PDF généré");
+            if let Some(directory) = dialog_directory {
+                dialog = dialog.set_directory(directory);
+            }
+            let picked = dialog.set_file_name(default_name).save_file();
             let Some(path) = picked else {
                 return;
             };
